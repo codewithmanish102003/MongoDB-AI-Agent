@@ -13,6 +13,41 @@ Point it to any MongoDB database (from local collections to massive multi-collec
 
 ---
 
+## 🖥️ Live Terminal Interface Preview
+
+```text
+  ╔═══════════════════════════════════════════════════════╗
+  ║            🍃 MongoDB AI Super Agent 🤖               ║
+  ║     Database Analytics + Semantic Vector RAG          ║
+  ║               Powered by Google Gemini                ║
+  ╚═══════════════════════════════════════════════════════╝
+  
+ℹ Connecting to MongoDB at: mongodb://localhost:27017 (Database: construction_management)
+✔ Connected to MongoDB successfully!
+ℹ Detected 101 collections in "construction_management"
+ℹ Primary LLM: gemini-3.6-flash
+ℹ Fallback LLM: OpenRouter (meta-llama/llama-3.3-70b-instruct)
+ℹ Active Session: SESSION-1740291438902-148
+✔ Super Agent ready! (MQL, Vector Search, Actions & Long-Term Memory)
+
+[SESSION-1740291438902-148] Ask Agent > Total sales revenue kitna h category wise?
+─────────────────────────────────────────────────────────────────────────────
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (1.42s)                       │
+├─────────────────────────────────────────────────────────────────────────────┘
+  Category-wise sales revenue breakdown:
+
+  • Structural Steel & Metal   : ₹ 48,25,000  (34 orders)
+  • Ready-Mix Concrete         : ₹ 36,90,000  (28 orders)
+  • Electrical & Wiring Units  : ₹ 19,45,000  (19 orders)
+  • Safety & Protective Gear   : ₹  8,15,000  (12 orders)
+  ────────────────────────────────────────────────────────
+  Total Net Revenue            : ₹ 1,12,75,000
+└─────────────────────────────────────────────────────────────────────────────
+```
+
+---
+
 ## ✨ Key Features
 
 - **🗣️ Natural Language Text-to-MQL & Aggregations:** Converts plain language questions into native MongoDB `find` filters and multi-stage aggregation pipelines (`$group`, `$lookup`, `$match`, `$sort`, `$project`) automatically.
@@ -24,8 +59,9 @@ Point it to any MongoDB database (from local collections to massive multi-collec
 
 ---
 
-## 🏛️ Architecture
+## 🏛️ Architecture & Execution Flow
 
+### System Component Architecture
 ```mermaid
 flowchart TD
     User([User / Developer]) --> CLI["Interactive REPL CLI (src/cli.ts)"]
@@ -56,6 +92,44 @@ flowchart TD
     end
 
     Toolsets <--> Database
+```
+
+### End-to-End Query & Failover Workflow
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Developer / User
+    participant CLI as Interactive CLI
+    participant Agent as Unified Agent
+    participant Gemini as Google Gemini 3.6 Flash
+    participant OR as OpenRouter (Llama 3.3 70B)
+    participant Mongo as MongoDB Cluster
+
+    User->>CLI: "Show top 5 vendor expenses"
+    CLI->>Agent: ask(query)
+    Agent->>Mongo: Fetch active memory & collection index
+    Agent->>Gemini: Prompt + 13 Tool Definitions
+    
+    alt Primary Provider (Gemini) OK
+        Gemini->>Agent: call tool `run_aggregation`
+        Agent->>Mongo: Execute aggregation pipeline
+        Mongo-->>Agent: Pipeline results
+        Agent->>Gemini: Tool response data
+        Gemini-->>Agent: Natural language answer
+    else Gemini 429 Rate Limit / Quota Exhausted
+        Gemini--xAgent: 429 Rate Limit Reached
+        Note over Agent,OR: 🛡️ Automatic Zero-Downtime Failover
+        Agent->>OR: Fallback request with multi-turn history
+        OR->>Agent: call tool `run_aggregation`
+        Agent->>Mongo: Execute aggregation pipeline
+        Mongo-->>Agent: Pipeline results
+        Agent->>OR: Tool response data
+        OR-->>Agent: Natural language answer
+    end
+
+    Agent->>Mongo: Persist Q&A to `chat_messages`
+    Agent-->>CLI: Formatted answer + Provider badge
+    CLI-->>User: Render visual answer card
 ```
 
 ---
@@ -154,31 +228,61 @@ Inside the agent terminal, special management commands are available:
 
 ## 💡 Example Queries to Try
 
-### 📊 Database Analytics & Aggregations
+### 📊 1. Database Analytics & Aggregations
 ```text
-Ask > Which top 3 product categories generated the highest revenue?
-Ask > What is our total pending order volume and the average order value?
-Ask > Show me all customers who placed an order in the last 30 days.
+[CLI] Ask Agent > Which top 3 categories generated the highest revenue?
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (1.23s)                       │
+├─────────────────────────────────────────────────────────────────────────────┘
+  Top 3 Product Categories by Total Revenue:
+
+  1. Electronics   : $ 42,950.00  (62 orders)
+  2. Office Chairs : $ 28,400.00  (39 orders)
+  3. Desks & Racks : $ 19,100.00  (21 orders)
+└─────────────────────────────────────────────────────────────────────────────
 ```
 
-### 🔍 Semantic Vector Search & Recommendations
+### 🔍 2. Semantic Vector Search & Recommendations (RAG)
 ```text
-Ask > Suggest ergonomic furniture suitable for developers with lower back discomfort.
-Ask > What is our store's policy if a customer receives a broken or damaged item?
-Ask > Explain our return and refund window.
+[CLI] Ask Agent > Recommend ergonomic items for back comfort
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (0.95s)                       │
+├─────────────────────────────────────────────────────────────────────────────┘
+  Top Semantic Matches (Cosine Similarity Score):
+
+  • ErgoLux Executive Mesh Chair (Score: 0.892)
+    - Dynamic lumbar support, adjustable 3D armrests, breathable mesh
+  • ActiveStanding Height-Adjustable Desk (Score: 0.841)
+    - Dual electric motors, programmable memory presets (65cm - 125cm)
+└─────────────────────────────────────────────────────────────────────────────
 ```
 
-### ⚡ Operational Actions & Audit Logging
+### ⚡ 3. Operational Actions & Immutable Audit Logging
 ```text
-Ask > Update order #ORD-1002 status to Shipped and set tracking to TRK-99214.
-Ask > Restock 50 units for product SKU-442.
-Ask > Show me the latest 5 database audit log entries.
+[CLI] Ask Agent > Update order #ORD-1002 status to Shipped with tracking TRK-8821
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (1.10s)                       │
+├─────────────────────────────────────────────────────────────────────────────┘
+  ✔ Order #ORD-1002 updated to "Shipped"
+  ✔ Tracking Number attached: "TRK-8821"
+  ✔ Audit Log recorded with ID: 67b84d912f84bc109aef82b3
+└─────────────────────────────────────────────────────────────────────────────
 ```
 
-### 🧠 Personalized Long-Term Memory
+### 🧠 4. Autonomous Long-Term Memory & Context Recall
 ```text
-Ask > Please remember that I am the lead supply chain manager and prefer concise tables.
-Ask > What are my key responsibilities and preferences that you have saved?
+[CLI] Ask Agent > Remember that my priority is cost efficiency and INR pricing
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (0.88s)                       │
+├─────────────────────────────────────────────────────────────────────────────┘
+  ✔ Got it! I have saved this preference to your long-term profile:
+    • [financial_preference] cost_priority: "Cost efficiency & INR pricing"
+    I will tailor future recommendations and budget breakdowns accordingly.
+└─────────────────────────────────────────────────────────────────────────────
 ```
 
 ---

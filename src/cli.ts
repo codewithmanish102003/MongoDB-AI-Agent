@@ -151,10 +151,17 @@ async function main() {
         const answer = await agent.ask(query);
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
-        logger.divider();
-        console.log(chalk.bold.green(`\n🤖 Response (${duration}s):`));
+        const providerBadge =
+          agent.lastProviderUsed === 'gemini'
+            ? chalk.bold.bgHex('#2563eb').white(' ⚡ Gemini 3.6 Flash ')
+            : chalk.bold.bgHex('#7c3aed').white(' 🛡️ OpenRouter (Llama 3.3 70B) ');
+
+        console.log('');
+        console.log(chalk.hex('#10b981')('┌─────────────────────────────────────────────────────────────────────────────┐'));
+        console.log(chalk.hex('#10b981')('│ ') + chalk.bold.white('🤖 Super Agent Response') + ' ' + providerBadge + chalk.hex('#64748b')(` (${duration}s)`) + chalk.hex('#10b981')(''.padStart(14, ' ') + '│'));
+        console.log(chalk.hex('#10b981')('├─────────────────────────────────────────────────────────────────────────────┘'));
         console.log(chalk.white(answer));
-        logger.divider();
+        console.log(chalk.hex('#10b981')('└─────────────────────────────────────────────────────────────────────────────\n'));
       } catch (err: any) {
         logger.error('Error answering question:', err);
       }

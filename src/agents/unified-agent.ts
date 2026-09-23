@@ -35,6 +35,7 @@ export class UnifiedAgent {
   private chat: any = null;
   public memoryStore: MongoMemoryStore;
   public currentSession: SessionRecord | null = null;
+  public lastProviderUsed: 'gemini' | 'openrouter' = 'gemini';
   private userId: string;
   private sessionId?: string;
 
@@ -144,9 +145,11 @@ export class UnifiedAgent {
     let answer = '';
 
     try {
+      this.lastProviderUsed = 'gemini';
       answer = await this.askGemini(userQuery);
     } catch (err: any) {
       if (isOpenRouterConfigured()) {
+        this.lastProviderUsed = 'openrouter';
         logger.warn(`Gemini issue detected: ${err.message}. Seamlessly switching to OpenRouter...`);
         const dbContext = await this.fetchDatabaseContext();
         const memoryContext = await this.fetchMemoryContext();
