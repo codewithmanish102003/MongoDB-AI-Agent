@@ -75,10 +75,10 @@ flowchart TD
 
     Orchestrator <--> LLM_Layer
 
-    subgraph Toolsets ["Tool Subsystems (13 Tools)"]
+    subgraph Toolsets ["Tool Subsystems (16 Tools)"]
         T1["Query Agent: list_collections, get_schema, find, aggregate"]
-        T2["RAG Agent: semantic_search, add_knowledge_document"]
-        T3["Task Agent: update_order, adjust_inventory, view_audit_trail"]
+        T2["RAG Agent: semantic_search (any collection), add_knowledge_document"]
+        T3["Task Agent: update_document, insert_document, delete_document, view_audit_trail"]
         T4["Memory Agent: remember_fact, get_memories, list_sessions"]
     end
 
@@ -202,7 +202,15 @@ npm run seed
 npm run seed:vectors
 ```
 
-### 5. Launch the AI Agent
+### 5. Run Automated Tests (Generic Verification)
+
+Validate that query, generic CRUD, vector search, and audit logging work on arbitrary collections:
+
+```bash
+npm test
+```
+
+### 6. Launch the AI Agent
 
 Start the interactive terminal CLI:
 

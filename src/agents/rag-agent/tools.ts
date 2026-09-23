@@ -6,21 +6,25 @@ import { Type, FunctionDeclaration } from '@google/genai';
 export const ragAgentFunctionDeclarations: FunctionDeclaration[] = [
   {
     name: 'semantic_search',
-    description: 'Performs semantic vector search across products or knowledge base to find relevant items by meaning and context.',
+    description: 'Performs semantic vector search across any collection or knowledge base in the MongoDB database to find relevant documents by meaning and context.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         query: {
           type: Type.STRING,
-          description: 'The natural language search query or concept (e.g., "office chair for back support", "return damaged package policy").'
+          description: 'The natural language search query, concept, or question.'
         },
         collectionName: {
           type: Type.STRING,
-          description: 'Which collection to search: "products" or "knowledge_base". Default is "knowledge_base".'
+          description: 'The collection to search (e.g. "knowledge_base", "documents", "articles", "products", or any custom collection). Default is "knowledge_base".'
+        },
+        vectorField: {
+          type: Type.STRING,
+          description: 'The document field containing vector embeddings (default is "embedding").'
         },
         limit: {
           type: Type.INTEGER,
-          description: 'Number of top similar documents to return (default 3, max 5).'
+          description: 'Number of top similar documents to return (default 3, max 10).'
         }
       },
       required: ['query']
@@ -38,11 +42,15 @@ export const ragAgentFunctionDeclarations: FunctionDeclaration[] = [
         },
         category: {
           type: Type.STRING,
-          description: 'Category (e.g., "Policy", "Technical Support", "Offers").'
+          description: 'Category (e.g., "Policy", "Technical Support", "Offers", "Guidelines").'
         },
         content: {
           type: Type.STRING,
           description: 'Full textual content of the document.'
+        },
+        collectionName: {
+          type: Type.STRING,
+          description: 'Target collection name (default is "knowledge_base").'
         }
       },
       required: ['title', 'category', 'content']
@@ -55,11 +63,12 @@ export async function executeRagTool(name: string, args: any): Promise<any> {
 
   switch (name) {
     case 'semantic_search': {
-      const { query, collectionName = 'knowledge_base', limit = 3 } = args;
-      const targetCol = collectionName === 'products' ? 'products' : 'knowledge_base';
-      const safeLimit = Math.min(Math.max(Number(limit) || 3, 1), 5);
+      const { query, collectionName = 'knowledge_base', vectorField = 'embedding', limit = 3 } = args;
+      const targetCol = collectionName.trim() || 'knowledge_base';
+      const vField = vectorField.trim() || 'embedding';
+      const safeLimit = Math.min(Math.max(Number(limit) || 3, 1), 10);
 
-      logger.tool('semantic_search', `Target: "${targetCol}", Query: "${query}"`);
+      logger.tool('semantic_search', `Target: "${targetCol}", Field: "${vField}", Query: "${query}"`);
 
       // 1. Generate query embedding
       const queryVector = await generateEmbedding(query);
@@ -70,7 +79,7 @@ export async function executeRagTool(name: string, args: any): Promise<any> {
           {
             $vectorSearch: {
               index: 'vector_index',
-              path: 'embedding',
+              path: vField,
               queryVector,
               numCandidates: 20,
               limit: safeLimit
@@ -78,7 +87,7 @@ export async function executeRagTool(name: string, args: any): Promise<any> {
           },
           {
             $project: {
-              embedding: 0,
+              [vField]: 0,
               score: { $meta: 'vectorSearchScore' }
             }
           }
@@ -86,27 +95,47 @@ export async function executeRagTool(name: string, args: any): Promise<any> {
 
         const atlasResults = await db.collection(targetCol).aggregate(atlasPipeline).toArray();
         if (atlasResults.length > 0) {
-          logger.result(`Atlas $vectorSearch matched ${atlasResults.length} document(s)`);
-          return { matches: atlasResults };
+          logger.result(`Atlas $vectorSearch matched ${atlasResults.length} document(s) in "${targetCol}"`);
+          return {
+            query,
+            collection: targetCol,
+            matches: atlasResults
+          };
         }
       } catch {
-        // Fall back to direct cosine similarity (expected for local MongoDB)
+        // Fall back to direct cosine similarity (expected for local MongoDB or unindexed collections)
       }
 
       // 3. Fallback: In-database cosine similarity matching
-      const docs = await db.collection(targetCol).find({ embedding: { $exists: true } }).toArray();
+      const docs = await db.collection(targetCol).find({ [vField]: { $exists: true } }).toArray();
 
       if (docs.length === 0) {
+        // Check if there are collections that DO have embeddings
+        const allCols = await db.listCollections().toArray();
+        const candidateCols: string[] = [];
+        for (const c of allCols) {
+          if (!c.name.startsWith('system.')) {
+            const hasVec = await db.collection(c.name).findOne({ [vField]: { $exists: true } });
+            if (hasVec) candidateCols.push(c.name);
+          }
+        }
+
+        const candidateNote =
+          candidateCols.length > 0
+            ? ` Collections with vector embeddings detected: [${candidateCols.join(', ')}].`
+            : ` No collections found with field "${vField}".`;
+
         return {
-          message: `No documents with vector embeddings found in "${targetCol}". Please run "npm run seed:vectors" to generate embeddings.`
+          message: `No documents with vector embeddings found in "${targetCol}".${candidateNote}`
         };
       }
 
       const scoredDocs = docs
+        .filter((doc) => Array.isArray(doc[vField]))
         .map((doc) => {
-          const similarity = cosineSimilarity(queryVector, doc.embedding as number[]);
-          // Omit large embedding vector from output
-          const { embedding, ...rest } = doc;
+          const similarity = cosineSimilarity(queryVector, doc[vField] as number[]);
+          // Omit large embedding vector from output to save context window
+          const { [vField]: _emb, ...rest } = doc;
           return {
             ...rest,
             similarityScore: `${(similarity * 100).toFixed(1)}%`,
@@ -116,7 +145,7 @@ export async function executeRagTool(name: string, args: any): Promise<any> {
         .sort((a, b) => b.rawScore - a.rawScore)
         .slice(0, safeLimit);
 
-      logger.result(`Matched top ${scoredDocs.length} document(s) (Highest match: ${scoredDocs[0]?.similarityScore})`);
+      logger.result(`Matched top ${scoredDocs.length} document(s) in "${targetCol}" (Highest match: ${scoredDocs[0]?.similarityScore})`);
 
       return {
         query,
@@ -126,14 +155,15 @@ export async function executeRagTool(name: string, args: any): Promise<any> {
     }
 
     case 'add_knowledge_document': {
-      const { title, category, content } = args;
-      logger.tool('add_knowledge_document', `Title: "${title}"`);
+      const { title, category, content, collectionName = 'knowledge_base' } = args;
+      const targetCol = collectionName.trim() || 'knowledge_base';
+      logger.tool('add_knowledge_document', `Title: "${title}", Collection: "${targetCol}"`);
 
       const textToEmbed = `${title}\nCategory: ${category}\n${content}`;
       const embedding = await generateEmbedding(textToEmbed);
 
-      const docId = `KB-${Date.now().toString().slice(-4)}`;
-      await db.collection('knowledge_base').insertOne({
+      const docId = `DOC-${Date.now().toString().slice(-4)}`;
+      await db.collection(targetCol).insertOne({
         docId,
         title,
         category,
@@ -142,11 +172,12 @@ export async function executeRagTool(name: string, args: any): Promise<any> {
         createdAt: new Date()
       });
 
-      logger.result(`Added knowledge document with ID: ${docId}`);
+      logger.result(`Added document with ID: ${docId} to "${targetCol}"`);
       return {
         success: true,
         docId,
-        message: `Successfully indexed document "${title}" into knowledge_base.`
+        collection: targetCol,
+        message: `Successfully indexed document "${title}" into "${targetCol}".`
       };
     }
 

@@ -22,6 +22,7 @@
     "dev": "tsx src/cli.ts",
     "seed": "tsx src/data/seed.ts",
     "seed:vectors": "tsx src/data/seed-knowledge.ts",
+    "test": "tsx tests/generic-agent.test.ts",
     "build": "tsc"
   },
   "dependencies": {

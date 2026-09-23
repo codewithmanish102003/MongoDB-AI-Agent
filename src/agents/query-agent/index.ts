@@ -14,7 +14,9 @@ export class QueryAgent {
       const collections = await db.listCollections().toArray();
       const valid = collections.filter((c) => !c.name.startsWith('system.'));
 
-      if (valid.length === 0) return '';
+      if (valid.length > 10) {
+        return `\n### Database Collections Overview (${valid.length} collections):\n${valid.map((c) => c.name).join(', ')}\n(Call \`get_collection_schema\` to inspect fields for any specific collection before querying).\n`;
+      }
 
       let schemaSummary = '\n### Current Database Schema Context:\n';
       for (const col of valid) {
