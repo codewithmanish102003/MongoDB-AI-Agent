@@ -30,7 +30,7 @@ Point it to any MongoDB database (from local collections to massive multi-collec
 ℹ Active Session: SESSION-1740291438902-148
 ✔ Super Agent ready! (MQL, Vector Search, Actions & Long-Term Memory)
 
-[SESSION-1740291438902-148] Ask Agent > Total sales revenue kitna h category wise?
+[SESSION-1740291438902-148] Ask Agent > What is the total sales revenue by category?
 ─────────────────────────────────────────────────────────────────────────────
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (1.42s)                       │

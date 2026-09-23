@@ -7,6 +7,8 @@ import { executeTaskTool, taskAgentFunctionDeclarations } from '../agents/task-a
 import { executeMemoryTool, memoryAgentFunctionDeclarations } from '../agents/memory-agent/tools.js';
 import { MongoMemoryStore } from '../agents/memory-agent/store.js';
 
+import { DatabaseAdapter } from '../database/adapter.js';
+
 let defaultMemoryStore = new MongoMemoryStore('default_user');
 
 export function setDefaultMemoryStore(store: MongoMemoryStore) {
@@ -47,7 +49,16 @@ function getOpenAITools() {
     ...memoryAgentFunctionDeclarations
   ];
 
-  return allDeclarations.map((d) => ({
+  const seen = new Set<string>();
+  const uniqueDeclarations = [];
+  for (const d of allDeclarations) {
+    if (d.name && !seen.has(d.name)) {
+      seen.add(d.name);
+      uniqueDeclarations.push(d);
+    }
+  }
+
+  return uniqueDeclarations.map((d) => ({
     type: 'function' as const,
     function: {
       name: d.name || '',
@@ -57,13 +68,13 @@ function getOpenAITools() {
   }));
 }
 
-async function executeAnyTool(name: string, args: any): Promise<any> {
+async function executeAnyTool(name: string, args: any, adapter?: DatabaseAdapter): Promise<any> {
   if (queryAgentFunctionDeclarations.some((d) => d.name === name)) {
-    return await executeQueryTool(name, args);
+    return await executeQueryTool(name, args, adapter);
   } else if (ragAgentFunctionDeclarations.some((d) => d.name === name)) {
-    return await executeRagTool(name, args);
+    return await executeRagTool(name, args, (adapter as any)?.getDb?.());
   } else if (taskAgentFunctionDeclarations.some((d) => d.name === name)) {
-    return await executeTaskTool(name, args);
+    return await executeTaskTool(name, args, adapter);
   } else {
     return await executeMemoryTool(name, args, defaultMemoryStore);
   }
@@ -71,7 +82,8 @@ async function executeAnyTool(name: string, args: any): Promise<any> {
 
 export async function askOpenRouterFallback(
   messages: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string; name?: string; tool_call_id?: string }>,
-  modelName?: string
+  modelName?: string,
+  adapter?: DatabaseAdapter
 ): Promise<string> {
   const openai = getOpenRouterClient();
   const config = getEnvConfig();
@@ -106,7 +118,7 @@ export async function askOpenRouterFallback(
         }
 
         try {
-          const result = await executeAnyTool(call.function?.name, args);
+          const result = await executeAnyTool(call.function?.name, args, adapter);
           convo.push({
             role: 'tool',
             tool_call_id: call.id,

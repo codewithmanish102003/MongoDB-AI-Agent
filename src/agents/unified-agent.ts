@@ -4,6 +4,8 @@ import { ragAgentFunctionDeclarations, executeRagTool } from './rag-agent/tools.
 import { taskAgentFunctionDeclarations, executeTaskTool } from './task-agent/tools.js';
 import { memoryAgentFunctionDeclarations, executeMemoryTool } from './memory-agent/tools.js';
 import { MongoMemoryStore, SessionRecord } from './memory-agent/store.js';
+import { DatabaseAdapter } from '../database/adapter.js';
+import { MongoDatabaseAdapter } from '../database/mongo-adapter.js';
 import { logger } from '../utils/logger.js';
 import { getDatabase } from '../config/db.js';
 import { createPartFromFunctionResponse } from '@google/genai';
@@ -45,24 +47,30 @@ export class UnifiedAgent {
   public lastProviderUsed: 'gemini' | 'openrouter' = 'gemini';
   private userId: string;
   private sessionId?: string;
+  public adapter: DatabaseAdapter;
 
-  constructor(userId: string = 'default_user', sessionId?: string) {
+  constructor(userId: string = 'default_user', sessionId?: string, adapter?: DatabaseAdapter) {
     this.userId = userId;
     this.sessionId = sessionId;
-    this.memoryStore = new MongoMemoryStore(this.userId);
+    this.adapter = adapter || new MongoDatabaseAdapter();
+    let memoryDb: any;
+    if (this.adapter instanceof MongoDatabaseAdapter) {
+      try {
+        memoryDb = this.adapter.getDb();
+      } catch {}
+    }
+    this.memoryStore = new MongoMemoryStore(this.userId, memoryDb);
     setDefaultMemoryStore(this.memoryStore);
   }
 
   private async fetchDatabaseContext(): Promise<string> {
     try {
-      const db = getDatabase();
-      const collections = await db.listCollections().toArray();
-      const valid = collections.filter((c) => !c.name.startsWith('system.'));
+      const collections = await this.adapter.listCollections();
 
-      if (valid.length === 0) return '';
+      if (collections.length === 0) return '';
 
       // Compact context: list collection names without dumping massive raw schemas
-      return `\n### Database Collections Overview (${valid.length} collections):\n${valid.map((c) => c.name).join(', ')}\n(Call \`get_collection_schema\` to inspect fields for any specific collection before querying).\n`;
+      return `\n### Database Collections Overview (${collections.length} collections):\n${collections.join(', ')}\n(Call \`get_collection_schema\` to inspect fields for any specific collection before querying).\n`;
     } catch {
       return '';
     }
@@ -90,12 +98,19 @@ export class UnifiedAgent {
     const dbContext = await this.fetchDatabaseContext();
     const memoryContext = await this.fetchMemoryContext();
 
-    const allTools = [
+    const seen = new Set<string>();
+    const allTools: any[] = [];
+    for (const d of [
       ...queryAgentFunctionDeclarations,
       ...ragAgentFunctionDeclarations,
       ...taskAgentFunctionDeclarations,
       ...memoryAgentFunctionDeclarations
-    ];
+    ]) {
+      if (d.name && !seen.has(d.name)) {
+        seen.add(d.name);
+        allTools.push(d);
+      }
+    }
 
     this.chat = ai.chats.create({
       model,
@@ -176,7 +191,7 @@ export class UnifiedAgent {
         // Append current user message
         convoMessages.push({ role: 'user', content: userQuery });
 
-        answer = await askOpenRouterFallback(convoMessages);
+        answer = await askOpenRouterFallback(convoMessages, undefined, this.adapter);
       } else {
         throw err;
       }
@@ -203,11 +218,11 @@ export class UnifiedAgent {
         try {
           let result: any;
           if (queryAgentFunctionDeclarations.some((d) => d.name === call.name)) {
-            result = await executeQueryTool(call.name, call.args || {});
+            result = await executeQueryTool(call.name, call.args || {}, this.adapter);
           } else if (ragAgentFunctionDeclarations.some((d) => d.name === call.name)) {
-            result = await executeRagTool(call.name, call.args || {});
+            result = await executeRagTool(call.name, call.args || {}, (this.adapter as any).getDb?.());
           } else if (taskAgentFunctionDeclarations.some((d) => d.name === call.name)) {
-            result = await executeTaskTool(call.name, call.args || {});
+            result = await executeTaskTool(call.name, call.args || {}, this.adapter);
           } else {
             result = await executeMemoryTool(call.name, call.args || {}, this.memoryStore);
           }

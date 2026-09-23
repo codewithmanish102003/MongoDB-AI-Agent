@@ -58,8 +58,10 @@ export const ragAgentFunctionDeclarations: FunctionDeclaration[] = [
   }
 ];
 
-export async function executeRagTool(name: string, args: any): Promise<any> {
-  const db = getDatabase();
+import { Db } from 'mongodb';
+
+export async function executeRagTool(name: string, args: any, dbInstance?: Db): Promise<any> {
+  const db = dbInstance || getDatabase();
 
   switch (name) {
     case 'semantic_search': {

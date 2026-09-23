@@ -1,19 +1,96 @@
+import { DatabaseAdapter } from '../../database/adapter.js';
+import { MongoDatabaseAdapter } from '../../database/mongo-adapter.js';
+import { confirmationManager } from '../../database/confirmation.js';
+import { SchemaInspector } from '../../database/schema-inspector.js';
+import { AuditLogger, defaultAuditLogger } from '../../database/audit-logger.js';
 import { getDatabase } from '../../config/db.js';
 import { logger } from '../../utils/logger.js';
 import { Type, FunctionDeclaration } from '@google/genai';
 import { ObjectId } from 'mongodb';
 
+let defaultAdapter: DatabaseAdapter = new MongoDatabaseAdapter();
+
+export function setDefaultTaskDatabaseAdapter(adapter: DatabaseAdapter) {
+  defaultAdapter = adapter;
+}
+
 export const taskAgentFunctionDeclarations: FunctionDeclaration[] = [
-  // --- Generic Database Operational Tools (Applicable to ANY collection) ---
+  // --- Schema Discovery Tools ---
   {
-    name: 'update_document',
-    description: 'Safely updates one or more documents in ANY collection matching a specific filter. Automatically records the change in audit_logs.',
+    name: 'list_collections',
+    description: 'Lists all available collections in the database. Use this to discover collections in an unfamiliar database.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {}
+    }
+  },
+  {
+    name: 'get_collection_schema',
+    description: 'Inspects field names, nested paths, data types, indexes, and sample document of any collection. Call this BEFORE modifying data so you never guess field names.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         collectionName: {
           type: Type.STRING,
-          description: 'The collection name to update (e.g. "projects", "vendors", "invoices", "orders", "users").'
+          description: 'The name of the collection to inspect.'
+        }
+      },
+      required: ['collectionName']
+    }
+  },
+
+  // --- Core Generic Structured Database Operation Tool ---
+  {
+    name: 'execute_task_operation',
+    description: 'Executes or stages a structured generic database write operation (insert, update, or delete). For safety, updates and deletions require explicit confirmation before execution.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        type: {
+          type: Type.STRING,
+          description: 'Operation type: "insert", "update", or "delete".'
+        },
+        collection: {
+          type: Type.STRING,
+          description: 'Target collection name in the database.'
+        },
+        document: {
+          type: Type.STRING,
+          description: 'JSON string representing the document to insert (required for type="insert").'
+        },
+        filter: {
+          type: Type.STRING,
+          description: 'JSON string filter matching the document(s) (required for type="update" or "delete"). Must not be empty.'
+        },
+        update: {
+          type: Type.STRING,
+          description: 'JSON string of update operators (e.g. \'{"$set": {"status": "inactive"}}\') (required for type="update").'
+        },
+        reason: {
+          type: Type.STRING,
+          description: 'Mandatory business explanation for performing this operation.'
+        },
+        confirmed: {
+          type: Type.BOOLEAN,
+          description: 'Set to true ONLY if the user has explicitly confirmed the execution.'
+        },
+        confirmationId: {
+          type: Type.STRING,
+          description: 'The confirmationId received from a previous dry-run/preview step.'
+        }
+      },
+      required: ['type', 'collection', 'reason']
+    }
+  },
+  {
+    name: 'update_document',
+    description: 'Safely updates document(s) in ANY collection matching a specific non-empty filter. Automatically logs the change in audit_logs.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        collectionName: {
+          type: Type.STRING,
+          description: 'The collection name to update.'
         },
         filter: {
           type: Type.STRING,
@@ -21,11 +98,19 @@ export const taskAgentFunctionDeclarations: FunctionDeclaration[] = [
         },
         update: {
           type: Type.STRING,
-          description: 'JSON string of update operators (e.g. \'{"$set": {"status": "Active", "updatedAt": "2026-09-23"}}\') or plain fields to set.'
+          description: 'JSON string of update operators (e.g. \'{"$set": {"status": "Active"}}\') or plain fields to set.'
         },
         reason: {
           type: Type.STRING,
           description: 'Reason for performing this database update.'
+        },
+        confirmed: {
+          type: Type.BOOLEAN,
+          description: 'Set to true if user has confirmed execution.'
+        },
+        confirmationId: {
+          type: Type.STRING,
+          description: 'Optional confirmation ID from a previous preview step.'
         }
       },
       required: ['collectionName', 'filter', 'update']
@@ -70,6 +155,14 @@ export const taskAgentFunctionDeclarations: FunctionDeclaration[] = [
         reason: {
           type: Type.STRING,
           description: 'Required explanation for why this document is being removed.'
+        },
+        confirmed: {
+          type: Type.BOOLEAN,
+          description: 'Set to true if user has confirmed deletion.'
+        },
+        confirmationId: {
+          type: Type.STRING,
+          description: 'Optional confirmation ID from preview step.'
         }
       },
       required: ['collectionName', 'filter', 'reason']
@@ -158,11 +251,14 @@ export const taskAgentFunctionDeclarations: FunctionDeclaration[] = [
   }
 ];
 
-const RESTRICTED_SYSTEM_COLLECTIONS = ['sessions', 'chat_messages', 'user_memories', 'audit_logs'];
-
 function parseObjectIdIfValid(filter: Record<string, any>): Record<string, any> {
   const transformed = { ...filter };
-  if (transformed._id && typeof transformed._id === 'string' && ObjectId.isValid(transformed._id) && transformed._id.length === 24) {
+  if (
+    transformed._id &&
+    typeof transformed._id === 'string' &&
+    ObjectId.isValid(transformed._id) &&
+    transformed._id.length === 24
+  ) {
     transformed._id = new ObjectId(transformed._id);
   }
   return transformed;
@@ -179,170 +275,396 @@ function safeParseJson(val: any, fallback: any = {}): any {
   }
 }
 
-export async function executeTaskTool(name: string, args: any): Promise<any> {
-  const db = getDatabase();
-  const auditCol = db.collection('audit_logs');
+export async function executeTaskTool(name: string, args: any, adapter?: DatabaseAdapter): Promise<any> {
+  const currentAdapter = adapter || defaultAdapter;
+  let auditLogger: AuditLogger = defaultAuditLogger;
+  let db: any = null;
+  if (currentAdapter instanceof MongoDatabaseAdapter) {
+    try {
+      db = currentAdapter.getDb();
+      auditLogger = new AuditLogger(db);
+    } catch {}
+  }
+  if (!db) {
+    try {
+      db = getDatabase();
+      auditLogger = new AuditLogger(db);
+    } catch {}
+  }
 
   switch (name) {
-    // --- Generic Operational Database Tools ---
-    case 'update_document': {
-      const { collectionName, reason = 'No reason provided' } = args;
-      const colName = collectionName?.trim();
-      if (!colName) throw new Error('collectionName is required.');
-      if (RESTRICTED_SYSTEM_COLLECTIONS.includes(colName) || colName.startsWith('system.')) {
-        throw new Error(`Security restriction: direct modification of internal collection "${colName}" is disallowed.`);
+    // --- Schema Discovery Tools ---
+    case 'list_collections': {
+      logger.tool('list_collections');
+      const names = await currentAdapter.listCollections();
+      logger.result(`Found collections: [${names.join(', ')}]`);
+      return { collections: names };
+    }
+
+    case 'get_collection_schema': {
+      const { collectionName } = args;
+      logger.tool('get_collection_schema', `Collection: "${collectionName}"`);
+
+      const dbInstance = (currentAdapter as any)?.getDb?.();
+      const inspector = new SchemaInspector(dbInstance);
+      const schemaInfo = await inspector.inspectCollection(collectionName);
+      const schemaSummary = inspector.formatCollectionForLLM(schemaInfo);
+
+      logger.result(`Inferred ${Object.keys(schemaInfo.fields).length} fields for "${collectionName}"`);
+
+      return {
+        collection: collectionName,
+        schemaSummary,
+        schemaDetails: schemaInfo
+      };
+    }
+
+    // --- Core Generic Structured Database Operation Tool ---
+    case 'execute_task_operation': {
+      const {
+        type,
+        collection,
+        reason = 'No reason provided',
+        confirmed = false,
+        confirmationId
+      } = args;
+
+      const opType = (type || '').toLowerCase().trim();
+      const colName = (collection || '').trim();
+
+      if (!['insert', 'update', 'delete'].includes(opType)) {
+        throw new Error(`Invalid operation type "${type}". Must be "insert", "update", or "delete".`);
       }
 
-      const rawFilter = safeParseJson(args.filter, {});
-      const filter = parseObjectIdIfValid(rawFilter);
+      // --- INSERT ---
+      if (opType === 'insert') {
+        const doc = safeParseJson(args.document, null);
+        if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+          throw new Error('Insert operation requires a valid JSON document object.');
+        }
 
-      if (!filter || Object.keys(filter).length === 0) {
-        throw new Error('Safety violation: An empty filter {} is not allowed for update operations to prevent whole-collection modifications.');
-      }
+        if (!doc.createdAt) {
+          doc.createdAt = new Date();
+        }
 
-      const rawUpdate = safeParseJson(args.update, {});
-      if (!rawUpdate || Object.keys(rawUpdate).length === 0) {
-        throw new Error('Update payload must be a non-empty JSON object.');
-      }
+        logger.tool('execute_task_operation:insert', `Collection: "${colName}"`);
 
-      const hasOperators = Object.keys(rawUpdate).some((k) => k.startsWith('$'));
-      const updatePayload = hasOperators ? rawUpdate : { $set: rawUpdate };
-
-      logger.tool('update_document', `Collection: "${colName}", Filter: ${JSON.stringify(rawFilter)}`);
-
-      const col = db.collection(colName);
-      const previousDoc = await col.findOne(filter);
-
-      if (!previousDoc) {
-        return {
-          success: false,
+        const insertResult = await currentAdapter.insert({
           collection: colName,
-          message: `No document found in "${colName}" matching filter ${JSON.stringify(rawFilter)}.`
+          document: doc
+        });
+
+        await auditLogger.logEvent({
+          action: 'INSERT_DOCUMENT',
+          collection: colName,
+          insertedId: insertResult.insertedId,
+          document: doc,
+          reason
+        });
+
+        logger.result(`Inserted document into "${colName}" (ID: ${insertResult.insertedId})`);
+
+        return {
+          status: 'EXECUTED',
+          success: true,
+          action: 'insert',
+          collection: colName,
+          insertedId: insertResult.insertedId,
+          message: `Successfully inserted new document into "${colName}" with ID: ${insertResult.insertedId}.`
         };
       }
 
-      const result = await col.updateOne(filter, updatePayload);
-      const updatedDoc = await col.findOne(filter);
+      // --- UPDATE ---
+      if (opType === 'update') {
+        // Staged operation execution with confirmationId
+        if (confirmationId) {
+          const staged = confirmationManager.getAndConsume(confirmationId);
+          if (!staged) {
+            throw new Error(`Confirmation ID "${confirmationId}" is invalid or expired. Please stage the operation again.`);
+          }
 
-      await auditCol.insertOne({
-        action: 'UPDATE_DOCUMENT',
-        collection: colName,
-        filter: rawFilter,
-        previousState: previousDoc,
-        newState: updatedDoc,
-        reason,
-        timestamp: new Date()
-      });
+          logger.tool('execute_task_operation:update_confirmed', `Collection: "${staged.collection}", ConfID: ${confirmationId}`);
 
-      logger.result(`Updated document in "${colName}" (matched: ${result.matchedCount}, modified: ${result.modifiedCount})`);
+          const updateResult = await currentAdapter.update({
+            collection: staged.collection,
+            filter: staged.filter || {},
+            update: staged.update || {},
+            multi: staged.multi
+          });
 
-      return {
-        success: true,
-        collection: colName,
-        matchedCount: result.matchedCount,
-        modifiedCount: result.modifiedCount,
-        previousState: previousDoc,
-        updatedState: updatedDoc,
-        message: `Successfully updated document in "${colName}".`
-      };
+          await auditLogger.logEvent({
+            action: 'UPDATE_DOCUMENT',
+            collection: staged.collection,
+            filter: staged.filter,
+            update: staged.update,
+            matchedCount: updateResult.matchedCount,
+            modifiedCount: updateResult.modifiedCount,
+            reason: staged.reason,
+            confirmationId
+          });
+
+          logger.result(`Executed confirmed update in "${staged.collection}" (${updateResult.modifiedCount} modified)`);
+
+          return {
+            status: 'EXECUTED',
+            success: true,
+            action: 'update',
+            collection: staged.collection,
+            matchedCount: updateResult.matchedCount,
+            modifiedCount: updateResult.modifiedCount,
+            message: `Successfully executed confirmed update in "${staged.collection}" (${updateResult.modifiedCount} document(s) modified).`
+          };
+        }
+
+        const rawFilter = safeParseJson(args.filter, {});
+        const filter = parseObjectIdIfValid(rawFilter);
+        const rawUpdate = safeParseJson(args.update, {});
+
+        // If NOT confirmed, stage for user confirmation
+        if (!confirmed) {
+          const matchedCount = await currentAdapter.count({ collection: colName, filter });
+          if (matchedCount === 0) {
+            return {
+              status: 'NOT_FOUND',
+              action: 'update',
+              collection: colName,
+              matchedCount: 0,
+              message: `No documents found in "${colName}" matching filter ${JSON.stringify(rawFilter)}.`
+            };
+          }
+
+          const previewDocs = await currentAdapter.find({ collection: colName, filter, limit: 3 });
+
+          const staged = confirmationManager.stageOperation({
+            action: 'update',
+            collection: colName,
+            filter,
+            update: rawUpdate,
+            matchedCount,
+            previewDocuments: previewDocs.documents,
+            reason
+          });
+
+          logger.warn(`Staged update requiring confirmation: ${staged.confirmationId} (${matchedCount} doc(s))`);
+
+          return {
+            status: 'REQUIRES_CONFIRMATION',
+            confirmationRequired: true,
+            confirmationId: staged.confirmationId,
+            action: 'update',
+            collection: colName,
+            matchedCount,
+            affectedDocumentsPreview: staged.previewDocuments,
+            proposedUpdate: rawUpdate,
+            reason,
+            message: `CONFIRMATION REQUIRED: This operation will update ${matchedCount} document(s) in collection "${colName}". Please ask the user to confirm. Once confirmed, invoke execute_task_operation with confirmed: true and confirmationId: "${staged.confirmationId}".`
+          };
+        }
+
+        // Direct execution when explicitly confirmed
+        logger.tool('execute_task_operation:update_direct', `Collection: "${colName}", Filter: ${JSON.stringify(rawFilter)}`);
+
+        const updateResult = await currentAdapter.update({
+          collection: colName,
+          filter,
+          update: rawUpdate
+        });
+
+        await auditLogger.logEvent({
+          action: 'UPDATE_DOCUMENT',
+          collection: colName,
+          filter: rawFilter,
+          update: rawUpdate,
+          matchedCount: updateResult.matchedCount,
+          modifiedCount: updateResult.modifiedCount,
+          reason
+        });
+
+        logger.result(`Updated document in "${colName}" (${updateResult.modifiedCount} modified)`);
+
+        return {
+          status: 'EXECUTED',
+          success: true,
+          action: 'update',
+          collection: colName,
+          matchedCount: updateResult.matchedCount,
+          modifiedCount: updateResult.modifiedCount,
+          message: `Successfully updated document in "${colName}".`
+        };
+      }
+
+      // --- DELETE ---
+      if (opType === 'delete') {
+        // Staged operation execution with confirmationId
+        if (confirmationId) {
+          const staged = confirmationManager.getAndConsume(confirmationId);
+          if (!staged) {
+            throw new Error(`Confirmation ID "${confirmationId}" is invalid or expired. Please stage the operation again.`);
+          }
+
+          logger.tool('execute_task_operation:delete_confirmed', `Collection: "${staged.collection}", ConfID: ${confirmationId}`);
+
+          const deleteResult = await currentAdapter.delete({
+            collection: staged.collection,
+            filter: staged.filter || {}
+          });
+
+          await auditLogger.logEvent({
+            action: 'DELETE_DOCUMENT',
+            collection: staged.collection,
+            filter: staged.filter,
+            deletedCount: deleteResult.deletedCount,
+            deletedPreview: staged.previewDocuments,
+            reason: staged.reason,
+            confirmationId
+          });
+
+          logger.result(`Executed confirmed deletion in "${staged.collection}" (${deleteResult.deletedCount} deleted)`);
+
+          return {
+            status: 'EXECUTED',
+            success: true,
+            action: 'delete',
+            collection: staged.collection,
+            deletedCount: deleteResult.deletedCount,
+            message: `Successfully executed confirmed deletion in "${staged.collection}" (${deleteResult.deletedCount} document(s) deleted).`
+          };
+        }
+
+        const rawFilter = safeParseJson(args.filter, {});
+        const filter = parseObjectIdIfValid(rawFilter);
+
+        // If NOT confirmed, stage for user confirmation
+        if (!confirmed) {
+          const matchedCount = await currentAdapter.count({ collection: colName, filter });
+          if (matchedCount === 0) {
+            return {
+              status: 'NOT_FOUND',
+              action: 'delete',
+              collection: colName,
+              matchedCount: 0,
+              message: `No documents found in "${colName}" matching filter ${JSON.stringify(rawFilter)}.`
+            };
+          }
+
+          const previewDocs = await currentAdapter.find({ collection: colName, filter, limit: 3 });
+
+          const staged = confirmationManager.stageOperation({
+            action: 'delete',
+            collection: colName,
+            filter,
+            matchedCount,
+            previewDocuments: previewDocs.documents,
+            reason
+          });
+
+          logger.warn(`Staged delete requiring confirmation: ${staged.confirmationId} (${matchedCount} doc(s))`);
+
+          return {
+            status: 'REQUIRES_CONFIRMATION',
+            confirmationRequired: true,
+            confirmationId: staged.confirmationId,
+            action: 'delete',
+            collection: colName,
+            matchedCount,
+            affectedDocumentsPreview: staged.previewDocuments,
+            reason,
+            message: `DANGER: CONFIRMATION REQUIRED: This operation will permanently delete ${matchedCount} document(s) from collection "${colName}". Please ask the user for explicit confirmation. Once confirmed, invoke execute_task_operation with confirmed: true and confirmationId: "${staged.confirmationId}".`
+          };
+        }
+
+        // Direct execution when explicitly confirmed
+        logger.tool('execute_task_operation:delete_direct', `Collection: "${colName}", Filter: ${JSON.stringify(rawFilter)}`);
+
+        const deleteResult = await currentAdapter.delete({
+          collection: colName,
+          filter
+        });
+
+        await auditLogger.logEvent({
+          action: 'DELETE_DOCUMENT',
+          collection: colName,
+          filter: rawFilter,
+          deletedCount: deleteResult.deletedCount,
+          reason
+        });
+
+        logger.result(`Deleted document(s) from "${colName}" (${deleteResult.deletedCount} deleted)`);
+
+        return {
+          status: 'EXECUTED',
+          success: true,
+          action: 'delete',
+          collection: colName,
+          deletedCount: deleteResult.deletedCount,
+          message: `Successfully deleted document(s) from "${colName}".`
+        };
+      }
+
+      throw new Error(`Unsupported operation type: "${type}"`);
+    }
+
+    // --- Convenience Generic Methods Delegating to execute_task_operation ---
+    case 'update_document': {
+      return await executeTaskTool(
+        'execute_task_operation',
+        {
+          type: 'update',
+          collection: args.collectionName,
+          filter: args.filter,
+          update: args.update,
+          reason: args.reason || 'Direct document update',
+          confirmed: args.confirmed ?? true,
+          confirmationId: args.confirmationId
+        },
+        currentAdapter
+      );
     }
 
     case 'insert_document': {
-      const { collectionName, reason = 'Direct document creation' } = args;
-      const colName = collectionName?.trim();
-      if (!colName) throw new Error('collectionName is required.');
-      if (RESTRICTED_SYSTEM_COLLECTIONS.includes(colName) || colName.startsWith('system.')) {
-        throw new Error(`Security restriction: direct insertion into internal collection "${colName}" is disallowed.`);
-      }
-
-      const doc = safeParseJson(args.document, null);
-      if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
-        throw new Error('Document must be a valid JSON object.');
-      }
-
-      if (!doc.createdAt) {
-        doc.createdAt = new Date();
-      }
-
-      logger.tool('insert_document', `Collection: "${colName}"`);
-
-      const col = db.collection(colName);
-      const result = await col.insertOne(doc);
-
-      await auditCol.insertOne({
-        action: 'INSERT_DOCUMENT',
-        collection: colName,
-        insertedId: result.insertedId,
-        document: doc,
-        reason,
-        timestamp: new Date()
-      });
-
-      logger.result(`Inserted new document in "${colName}" with ID: ${result.insertedId}`);
-
-      return {
-        success: true,
-        collection: colName,
-        insertedId: result.insertedId,
-        message: `Document inserted into "${colName}" with ID ${result.insertedId}.`
-      };
+      return await executeTaskTool(
+        'execute_task_operation',
+        {
+          type: 'insert',
+          collection: args.collectionName,
+          document: args.document,
+          reason: args.reason || 'Direct document creation',
+          confirmed: true
+        },
+        currentAdapter
+      );
     }
 
     case 'delete_document': {
-      const { collectionName, reason } = args;
-      const colName = collectionName?.trim();
-      if (!colName) throw new Error('collectionName is required.');
-      if (RESTRICTED_SYSTEM_COLLECTIONS.includes(colName) || colName.startsWith('system.')) {
-        throw new Error(`Security restriction: direct deletion from internal collection "${colName}" is disallowed.`);
-      }
+      return await executeTaskTool(
+        'execute_task_operation',
+        {
+          type: 'delete',
+          collection: args.collectionName,
+          filter: args.filter,
+          reason: args.reason,
+          confirmed: args.confirmed ?? true,
+          confirmationId: args.confirmationId
+        },
+        currentAdapter
+      );
+    }
 
-      const rawFilter = safeParseJson(args.filter, {});
-      const filter = parseObjectIdIfValid(rawFilter);
+    case 'view_audit_trail': {
+      const { limit = 5 } = args;
+      const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 20);
+      logger.tool('view_audit_trail', `Limit: ${safeLimit}`);
 
-      if (!filter || Object.keys(filter).length === 0) {
-        throw new Error('Safety violation: An empty filter {} is not allowed for delete operations.');
-      }
-
-      if (!reason || reason.trim().length === 0) {
-        throw new Error('A reason is mandatory for document deletion.');
-      }
-
-      logger.tool('delete_document', `Collection: "${colName}", Filter: ${JSON.stringify(rawFilter)}`);
-
-      const col = db.collection(colName);
-      const docToDelete = await col.findOne(filter);
-
-      if (!docToDelete) {
-        return {
-          success: false,
-          collection: colName,
-          message: `No document found in "${colName}" matching filter ${JSON.stringify(rawFilter)}.`
-        };
-      }
-
-      const result = await col.deleteOne(filter);
-
-      await auditCol.insertOne({
-        action: 'DELETE_DOCUMENT',
-        collection: colName,
-        filter: rawFilter,
-        deletedDocument: docToDelete,
-        reason,
-        timestamp: new Date()
-      });
-
-      logger.result(`Deleted document from "${colName}" (deletedCount: ${result.deletedCount})`);
+      const events = await auditLogger.getRecentEvents(safeLimit);
+      logger.result(`Found ${events.length} audit event(s)`);
 
       return {
-        success: true,
-        collection: colName,
-        deletedCount: result.deletedCount,
-        deletedDocument: docToDelete,
-        message: `Successfully deleted document from "${colName}".`
+        count: events.length,
+        auditLogs: events
       };
     }
 
-    // --- Specialized / E-Commerce Operations ---
+    // --- Specialized E-Commerce Operations (Legacy Compatibility) ---
     case 'update_order_status': {
       const { orderId, newStatus, reason = 'No reason provided' } = args;
       const normalizedStatus = newStatus.toLowerCase().trim();
@@ -363,14 +685,12 @@ export async function executeTaskTool(name: string, args: any): Promise<any> {
 
       const previousStatus = order.status;
 
-      // Business rule: Cannot cancel shipped or delivered orders
       if (normalizedStatus === 'cancelled' && (previousStatus === 'shipped' || previousStatus === 'delivered')) {
         throw new Error(
           `Action Rejected: Order "${orderId}" is already ${previousStatus} and cannot be cancelled directly. Please initiate a return request instead.`
         );
       }
 
-      // Update the order status
       await ordersCol.updateOne(
         { orderId },
         {
@@ -382,7 +702,6 @@ export async function executeTaskTool(name: string, args: any): Promise<any> {
         }
       );
 
-      // Automatic Restock if cancelled
       let restockedItems: any[] = [];
       if (normalizedStatus === 'cancelled' && previousStatus !== 'cancelled') {
         const productsCol = db.collection('products');
@@ -396,14 +715,12 @@ export async function executeTaskTool(name: string, args: any): Promise<any> {
         logger.result(`Restocked items for cancelled order: ${JSON.stringify(restockedItems)}`);
       }
 
-      // Record Audit Trail
-      await auditCol.insertOne({
+      await auditLogger.logEvent({
         action: 'ORDER_STATUS_UPDATE',
         entityId: orderId,
         previousState: { status: previousStatus },
         newState: { status: normalizedStatus, restockedItems },
-        reason,
-        timestamp: new Date()
+        reason
       });
 
       return {
@@ -442,14 +759,13 @@ export async function executeTaskTool(name: string, args: any): Promise<any> {
 
       await productsCol.updateOne({ sku }, { $set: { stock: newStock, updatedAt: new Date() } });
 
-      await auditCol.insertOne({
+      await auditLogger.logEvent({
         action: 'INVENTORY_ADJUSTMENT',
         entityId: sku,
-        previousStock,
-        newStock,
-        quantityChange: changeNum,
-        reason,
-        timestamp: new Date()
+        previousState: { stock: previousStock },
+        newState: { stock: newStock },
+        metadata: { quantityChange: changeNum },
+        reason
       });
 
       logger.result(`Updated SKU "${sku}" stock: ${previousStock} -> ${newStock}`);
@@ -475,14 +791,12 @@ export async function executeTaskTool(name: string, args: any): Promise<any> {
 
       logger.tool('create_new_order', `Customer: "${customerId}", Items: ${itemsList.length}`);
 
-      // Verify customer
       const customersCol = db.collection('customers');
       const customer = await customersCol.findOne({ customerId });
       if (!customer) {
         throw new Error(`Customer "${customerId}" does not exist in database.`);
       }
 
-      // Verify and calculate products
       const productsCol = db.collection('products');
       let totalAmount = 0;
       const populatedItems = [];
@@ -506,7 +820,6 @@ export async function executeTaskTool(name: string, args: any): Promise<any> {
         });
       }
 
-      // Deduct inventory
       for (const item of populatedItems) {
         await productsCol.updateOne(
           { sku: item.sku },
@@ -514,7 +827,6 @@ export async function executeTaskTool(name: string, args: any): Promise<any> {
         );
       }
 
-      // Generate Order ID
       const count = await db.collection('orders').countDocuments();
       const orderId = `ORD-${5001 + count}`;
 
@@ -531,14 +843,11 @@ export async function executeTaskTool(name: string, args: any): Promise<any> {
 
       await db.collection('orders').insertOne(newOrderDoc);
 
-      // Audit entry
-      await auditCol.insertOne({
+      await auditLogger.logEvent({
         action: 'ORDER_CREATION',
         entityId: orderId,
-        customer: customer.name,
-        totalAmount,
-        itemsCount: populatedItems.length,
-        timestamp: new Date()
+        metadata: { customer: customer.name, totalAmount, itemsCount: populatedItems.length },
+        reason: 'Order placed by customer'
       });
 
       logger.result(`Created order "${orderId}" for ${customer.name} (Total: ₹${totalAmount})`);
@@ -551,20 +860,6 @@ export async function executeTaskTool(name: string, args: any): Promise<any> {
         items: populatedItems,
         status: 'pending',
         message: `Order "${orderId}" placed successfully for ${customer.name}. Total: ₹${totalAmount}.`
-      };
-    }
-
-    case 'view_audit_trail': {
-      const { limit = 5 } = args;
-      const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 20);
-      logger.tool('view_audit_trail', `Limit: ${safeLimit}`);
-
-      const events = await auditCol.find({}).sort({ timestamp: -1 }).limit(safeLimit).toArray();
-      logger.result(`Found ${events.length} audit event(s)`);
-
-      return {
-        count: events.length,
-        auditLogs: events
       };
     }
 
