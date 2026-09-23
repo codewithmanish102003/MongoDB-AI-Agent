@@ -85,8 +85,8 @@ flowchart TD
 Clone this repository and install dependencies:
 
 ```bash
-git clone https://github.com/your-username/mongodb-ai-agent.git
-cd mongodb-ai-agent
+git clone https://github.com/codewithmanish102003/MongoDB-AI-Agent.git
+cd MongoDB-AI-Agent
 npm install
 ```
 
