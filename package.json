@@ -1,0 +1,40 @@
+{
+  "name": "mongodb-ai-agent",
+  "version": "1.0.0",
+  "description": "Enterprise MongoDB AI Super Agent: Natural Language Text-to-MQL, Hybrid Vector Search RAG, Autonomous Actions, Multi-Model Redundancy (Gemini + OpenRouter), and Long-Term Memory.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "keywords": [
+    "mongodb",
+    "ai-agent",
+    "rag",
+    "vector-search",
+    "gemini",
+    "openrouter",
+    "text-to-sql",
+    "text-to-mql",
+    "llm",
+    "typescript"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "seed": "tsx src/data/seed.ts",
+    "seed:vectors": "tsx src/data/seed-knowledge.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@google/genai": "^2.24.0",
+    "chalk": "^6.0.0",
+    "dotenv": "^18.0.2",
+    "mongodb": "^7.6.0",
+    "openai": "^7.21.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
