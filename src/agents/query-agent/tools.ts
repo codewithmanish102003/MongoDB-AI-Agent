@@ -1,12 +1,19 @@
-import { getDatabase } from '../../config/db.js';
+import { DatabaseAdapter } from '../../database/adapter.js';
+import { MongoDatabaseAdapter } from '../../database/mongo-adapter.js';
 import { logger } from '../../utils/logger.js';
 import { Type, FunctionDeclaration } from '@google/genai';
+
+let defaultAdapter: DatabaseAdapter = new MongoDatabaseAdapter();
+
+export function setDefaultDatabaseAdapter(adapter: DatabaseAdapter) {
+  defaultAdapter = adapter;
+}
 
 // 1. Tool Declarations for Gemini
 export const queryAgentFunctionDeclarations: FunctionDeclaration[] = [
   {
     name: 'list_collections',
-    description: 'Lists all available collections in the MongoDB database.',
+    description: 'Lists all available collections in the database. Use this to discover collections in an unfamiliar database.',
     parameters: {
       type: Type.OBJECT,
       properties: {}
@@ -14,13 +21,13 @@ export const queryAgentFunctionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: 'get_collection_schema',
-    description: 'ESSENTIAL FIRST STEP: Inspects the exact field names, data types, and sample record of a collection. Always call this BEFORE find_documents or run_aggregation so you never guess field names.',
+    description: 'ESSENTIAL FIRST STEP: Introspects field names, nested paths (dot notation), data types, indexes, and sample document of any collection. Always call this BEFORE querying so you never guess field names.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         collectionName: {
           type: Type.STRING,
-          description: 'The name of the collection to inspect (e.g., "projects", "workorders", "expenses", "vendors").'
+          description: 'The name of the collection to inspect.'
         }
       },
       required: ['collectionName']
@@ -28,7 +35,7 @@ export const queryAgentFunctionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: 'find_documents',
-    description: 'Executes a MongoDB find query with optional filter, projection, sort, and limit. Leave projection empty unless necessary, so full document fields are returned without missing data.',
+    description: 'Executes a structured find query on a collection with optional filter, projection, sort, and limit. Leave projection empty unless necessary, so full document fields are returned without missing data.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -38,15 +45,15 @@ export const queryAgentFunctionDeclarations: FunctionDeclaration[] = [
         },
         filter: {
           type: Type.STRING,
-          description: 'JSON string for filter query (e.g. \'{"status": "Pending"}\'). Default is \'{}\'.'
+          description: 'JSON string for filter query (e.g. \'{"status": "Active"}\' or \'{"price": {"$gt": 100}}\'). Default is \'{}\'.'
         },
         projection: {
           type: Type.STRING,
-          description: 'Optional JSON string for projection. Prefer leaving empty to avoid omitting required fields.'
+          description: 'Optional JSON string for projection (e.g. \'{"name": 1, "email": 1}\'). Leave empty to retrieve all fields.'
         },
         sort: {
           type: Type.STRING,
-          description: 'JSON string for sorting (e.g., \'{"createdAt": -1}\').'
+          description: 'Optional JSON string for sorting (e.g. \'{"createdAt": -1}\').'
         },
         limit: {
           type: Type.INTEGER,
@@ -58,7 +65,7 @@ export const queryAgentFunctionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: 'run_aggregation',
-    description: 'Executes a MongoDB aggregation pipeline for calculations, grouping, summing, filtering, or sorting.',
+    description: 'Executes a multi-stage aggregation pipeline for calculations, grouping, summing, averages, statistical metrics, or multi-collection lookups.',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -68,7 +75,7 @@ export const queryAgentFunctionDeclarations: FunctionDeclaration[] = [
         },
         pipeline: {
           type: Type.STRING,
-          description: 'JSON string array of aggregation pipeline stages (e.g. \'[{"$match": {"status": "delivered"}}, {"$group": {"_id": "$paymentMethod", "totalRevenue": {"$sum": "$totalAmount"}}}]\').'
+          description: 'JSON string array of aggregation pipeline stages (e.g. \'[{"$match": {"status": "completed"}}, {"$group": {"_id": "$category", "total": {"$sum": "$amount"}}}]\').'
         },
         maxDocs: {
           type: Type.INTEGER,
@@ -76,6 +83,24 @@ export const queryAgentFunctionDeclarations: FunctionDeclaration[] = [
         }
       },
       required: ['collectionName', 'pipeline']
+    }
+  },
+  {
+    name: 'count_documents',
+    description: 'Counts documents in a collection matching an optional filter.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        collectionName: {
+          type: Type.STRING,
+          description: 'The collection name.'
+        },
+        filter: {
+          type: Type.STRING,
+          description: 'Optional JSON string filter (e.g. \'{"status": "active"}\'). Default is \'{}\'.'
+        }
+      },
+      required: ['collectionName']
     }
   }
 ];
@@ -101,15 +126,14 @@ function safeParseJson(jsonString: any, fallback: any = {}): any {
   }
 }
 
-// 2. Tool Implementations
-export async function executeQueryTool(name: string, args: any): Promise<any> {
-  const db = getDatabase();
+// 2. Tool Implementations (Routed through DatabaseAdapter and Policy Layer)
+export async function executeQueryTool(name: string, args: any, adapter?: DatabaseAdapter): Promise<any> {
+  const currentAdapter = adapter || defaultAdapter;
 
   switch (name) {
     case 'list_collections': {
       logger.tool('list_collections');
-      const collections = await db.listCollections().toArray();
-      const names = collections.map((c) => c.name).filter((n) => !n.startsWith('system.'));
+      const names = await currentAdapter.listCollections();
       logger.result(`Found collections: [${names.join(', ')}]`);
       return { collections: names };
     }
@@ -117,34 +141,18 @@ export async function executeQueryTool(name: string, args: any): Promise<any> {
     case 'get_collection_schema': {
       const { collectionName } = args;
       logger.tool('get_collection_schema', `Collection: "${collectionName}"`);
-      const collection = db.collection(collectionName);
-      const samples = await collection.find({}).limit(3).toArray();
 
-      if (samples.length === 0) {
-        return { message: `Collection "${collectionName}" exists but is currently empty.` };
-      }
+      const schemaInfo = await currentAdapter.getCollectionSchema(collectionName);
 
-      // Infer fields and sample types
-      const fieldsSummary: Record<string, string> = {};
-      samples.forEach((doc) => {
-        Object.entries(doc).forEach(([key, val]) => {
-          if (!fieldsSummary[key]) {
-            if (Array.isArray(val)) {
-              fieldsSummary[key] = `Array<${typeof val[0] || 'any'}>`;
-            } else if (val instanceof Date) {
-              fieldsSummary[key] = 'Date';
-            } else {
-              fieldsSummary[key] = typeof val;
-            }
-          }
-        });
-      });
-
-      logger.result(`Inferred ${Object.keys(fieldsSummary).length} fields for "${collectionName}"`);
+      logger.result(`Inferred ${Object.keys(schemaInfo.fields).length} fields for "${collectionName}"`);
       return {
         collection: collectionName,
-        fields: fieldsSummary,
-        sampleDocument: samples[0]
+        isEmpty: schemaInfo.isEmpty,
+        totalDocuments: schemaInfo.totalDocumentEstimate,
+        fields: schemaInfo.fields,
+        indexes: schemaInfo.indexes,
+        sampleDocument: schemaInfo.sampleDocument,
+        schemaSummary: schemaInfo.schemaSummary
       };
     }
 
@@ -154,25 +162,21 @@ export async function executeQueryTool(name: string, args: any): Promise<any> {
       const projection = safeParseJson(args.projection, {});
       const sort = safeParseJson(args.sort, {});
 
-      // Safety check: block $where operator
-      if (JSON.stringify(filter).includes('$where')) {
-        throw new Error('Security violation: $where operator is strictly disallowed.');
-      }
-
-      const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 50);
       logger.tool('find_documents', `Collection: "${collectionName}"`);
-      logger.query('find', JSON.stringify({ filter, projection, sort, limit: safeLimit }, null, 2));
+      logger.query('find', JSON.stringify({ filter, projection, sort, limit }, null, 2));
 
-      let cursor = db.collection(collectionName).find(filter);
-      if (Object.keys(projection).length > 0) cursor = cursor.project(projection);
-      if (Object.keys(sort).length > 0) cursor = cursor.sort(sort);
-      cursor = cursor.limit(safeLimit);
+      const result = await currentAdapter.find({
+        collection: collectionName,
+        filter,
+        projection,
+        sort,
+        limit: Number(limit) || 10
+      });
 
-      const docs = await cursor.toArray();
-      logger.result(`Returned ${docs.length} document(s)`);
+      logger.result(`Returned ${result.documents.length} document(s)`);
       return {
-        count: docs.length,
-        documents: docs
+        count: result.documents.length,
+        documents: result.documents
       };
     }
 
@@ -184,27 +188,40 @@ export async function executeQueryTool(name: string, args: any): Promise<any> {
         throw new Error('Aggregation pipeline must be a JSON array of pipeline stages.');
       }
 
-      // Safety check: block $out or $merge to prevent accidental overwrite in read-only tool
-      const stringified = JSON.stringify(pipeline);
-      if (stringified.includes('$out') || stringified.includes('$merge')) {
-        throw new Error('Security violation: $out and $merge stages are disallowed in read queries.');
-      }
-
-      const safeLimit = Math.min(Math.max(Number(maxDocs) || 20, 1), 50);
       logger.tool('run_aggregation', `Collection: "${collectionName}"`);
       logger.query('aggregate', JSON.stringify(pipeline, null, 2));
 
-      const results = await db.collection(collectionName).aggregate(pipeline).toArray();
-      const limitedResults = results.slice(0, safeLimit);
+      const result = await currentAdapter.aggregate({
+        collection: collectionName,
+        pipeline,
+        limit: Number(maxDocs) || 20
+      });
 
-      logger.result(`Aggregation produced ${results.length} record(s) (returning ${limitedResults.length})`);
+      logger.result(`Aggregation produced ${result.results.length} record(s)`);
       return {
-        count: limitedResults.length,
-        results: limitedResults
+        count: result.results.length,
+        results: result.results
+      };
+    }
+
+    case 'count_documents': {
+      const { collectionName } = args;
+      const filter = safeParseJson(args.filter, {});
+
+      logger.tool('count_documents', `Collection: "${collectionName}"`);
+      const count = await currentAdapter.count({
+        collection: collectionName,
+        filter
+      });
+
+      logger.result(`Counted ${count} document(s) in "${collectionName}"`);
+      return {
+        collection: collectionName,
+        count
       };
     }
 
     default:
-      throw new Error(`Unknown tool: "${name}"`);
+      throw new Error(`Unknown query tool: "${name}"`);
   }
 }

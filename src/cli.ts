@@ -52,12 +52,12 @@ async function main() {
   logger.success('Super Agent ready! (MQL, Vector Search, Actions & Long-Term Memory)\n');
 
   console.log(chalk.dim('Example prompts to try:'));
-  console.log(chalk.gray(' • Analytics: "Total sales revenue kitna h category wise?"'));
-  console.log(chalk.gray(' • Vector Search: "Back pain ke liye suitable desk ya chair suggest karo"'));
-  console.log(chalk.gray(' • Policy RAG: "Damaged item receive hone par return policy kya h?"'));
-  console.log(chalk.gray(' • Autonomous Task: "Order ORD-5003 cancel kardo aur reason me likho customer request"'));
-  console.log(chalk.gray(' • Long-Term Memory: "Yaad rakhna mera favorite payment mode UPI hai aur main Mumbai se hoon"'));
-  console.log(chalk.gray(' • Recall Memory: "Mere baare me kya-kya jante ho?"'));
+  console.log(chalk.gray(' • Analytics: "What is the total sales revenue by category?"'));
+  console.log(chalk.gray(' • Vector Search: "Suggest a suitable desk or ergonomic chair for back pain"'));
+  console.log(chalk.gray(' • Policy RAG: "What is the return policy if a damaged item is received?"'));
+  console.log(chalk.gray(' • Autonomous Task: "Cancel order ORD-5003 with the reason customer request"'));
+  console.log(chalk.gray(' • Long-Term Memory: "Remember that my favorite payment method is Credit Card and I am based in New York"'));
+  console.log(chalk.gray(' • Recall Memory: "What do you remember about me?"'));
   console.log(chalk.dim('\nSpecial commands:'));
   console.log(chalk.dim(' • "memory" -> View all stored long-term facts'));
   console.log(chalk.dim(' • "sessions" -> List past chat sessions'));

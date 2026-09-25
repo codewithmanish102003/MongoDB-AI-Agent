@@ -3,9 +3,16 @@ import { ragAgentFunctionDeclarations, executeRagTool } from './tools.js';
 import { RAG_AGENT_SYSTEM_PROMPT } from './prompts.js';
 import { logger } from '../../utils/logger.js';
 import { createPartFromFunctionResponse } from '@google/genai';
+import { DatabaseAdapter } from '../../database/adapter.js';
+import { MongoDatabaseAdapter } from '../../database/mongo-adapter.js';
 
 export class RagAgent {
   private chat: any = null;
+  private adapter: DatabaseAdapter;
+
+  constructor(adapter?: DatabaseAdapter) {
+    this.adapter = adapter || new MongoDatabaseAdapter();
+  }
 
   public async initSession() {
     const ai = getGeminiClient();
@@ -59,7 +66,7 @@ export class RagAgent {
 
       for (const call of response.functionCalls) {
         try {
-          const result = await executeRagTool(call.name, call.args || {});
+          const result = await executeRagTool(call.name, call.args || {}, this.adapter);
           toolResponses.push(
             createPartFromFunctionResponse(call.id || '', call.name, {
               success: true,

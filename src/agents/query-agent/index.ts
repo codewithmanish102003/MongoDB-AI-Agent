@@ -2,33 +2,29 @@ import { getGeminiClient, getModelName } from '../../llm/gemini.js';
 import { queryAgentFunctionDeclarations, executeQueryTool } from './tools.js';
 import { QUERY_AGENT_SYSTEM_PROMPT } from './prompts.js';
 import { logger } from '../../utils/logger.js';
-import { getDatabase } from '../../config/db.js';
+import { DatabaseAdapter } from '../../database/adapter.js';
+import { MongoDatabaseAdapter } from '../../database/mongo-adapter.js';
 import { createPartFromFunctionResponse } from '@google/genai';
 
 export class QueryAgent {
   private chat: any = null;
+  private adapter: DatabaseAdapter;
+
+  constructor(adapter?: DatabaseAdapter) {
+    this.adapter = adapter || new MongoDatabaseAdapter();
+  }
 
   private async fetchDatabaseContext(): Promise<string> {
     try {
-      const db = getDatabase();
-      const collections = await db.listCollections().toArray();
-      const valid = collections.filter((c) => !c.name.startsWith('system.'));
+      const collections = await this.adapter.listCollections();
+      if (collections.length === 0) return '';
 
-      if (valid.length === 0) return '';
-
-      let schemaSummary = '\n### Current Database Schema Context:\n';
-      for (const col of valid) {
-        const samples = await db.collection(col.name).find({}).limit(1).toArray();
-        if (samples.length > 0) {
-          const sampleKeys = Object.entries(samples[0])
-            .map(([k, v]) => `${k} (${Array.isArray(v) ? 'Array' : typeof v})`)
-            .join(', ');
-          schemaSummary += `- Collection \`${col.name}\`: Fields -> [${sampleKeys}]\n`;
-        } else {
-          schemaSummary += `- Collection \`${col.name}\`: (Empty collection)\n`;
-        }
+      if (collections.length > 10) {
+        return `\n### Database Collections Overview (${collections.length} collections):\n${collections.join(', ')}\n(Call \`get_collection_schema\` to inspect fields for any specific collection before querying).\n`;
       }
-      return schemaSummary;
+
+      const schemaRecord = await this.adapter.getDatabaseSchema();
+      return `\n### Discovered Database Schema Context:\n` + this.adapter.formatSchemaForLLM(schemaRecord);
     } catch {
       return '';
     }
@@ -85,7 +81,7 @@ export class QueryAgent {
 
       for (const call of response.functionCalls) {
         try {
-          const result = await executeQueryTool(call.name, call.args || {});
+          const result = await executeQueryTool(call.name, call.args || {}, this.adapter);
           toolResponses.push(
             createPartFromFunctionResponse(call.id || '', call.name, {
               success: true,
@@ -110,3 +106,4 @@ export class QueryAgent {
     return response.text || 'No response generated.';
   }
 }
+

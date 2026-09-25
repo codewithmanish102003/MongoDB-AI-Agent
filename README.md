@@ -1,15 +1,16 @@
-# 🍃 MongoDB AI Super Agent 🤖
+# 🍃 MongoDB AI Super Agent 🤖 (v2.0 Generic Enterprise Edition)
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=flat&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![MongoDB](https://img.shields.io/badge/MongoDB-7.0+-47A248?style=flat&logo=mongodb&logoColor=white)](https://www.mongodb.com/)
 [![Google Gemini](https://img.shields.io/badge/Gemini-3.6%20Flash-4285F4?style=flat&logo=google&logoColor=white)](https://ai.google.dev/)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-Llama%203.3%2070B%20Fallback-6366F1?style=flat)](https://openrouter.ai/)
+[![REST API](https://img.shields.io/badge/REST%20API-Production%20Hardened-green?style=flat)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An enterprise-grade, autonomous AI database agent for **MongoDB**. Query your database in plain English, perform semantic vector search (RAG), trigger operational tasks with transactional audit logging, and retain long-term memory across sessions — with zero-downtime **dual-LLM failover** between Google Gemini and OpenRouter.
+An enterprise-grade, autonomous, **schema-agnostic AI database agent** for **MongoDB**. Query any MongoDB database in plain English, introspect arbitrary schemas on the fly, run high-dimensional vector search (RAG), execute write operations with cryptographic confirmation tokens and append-only audit logging, and serve multi-tenant users via a production-ready **REST API** — with zero-downtime **dual-LLM failover** between Google Gemini and OpenRouter.
 
-Point it to any MongoDB database (from local collections to massive multi-collection production databases like ERPs, CRMs, or E-commerce stores) and start querying instantly.
+Point it to **ANY MongoDB database** (from small apps to massive multi-collection databases like ERPs, CRMs, FinTech, Healthcare, or Construction systems) without any hardcoded collection names or pre-registered schemas.
 
 ---
 
@@ -24,13 +25,13 @@ Point it to any MongoDB database (from local collections to massive multi-collec
   
 ℹ Connecting to MongoDB at: mongodb://localhost:27017 (Database: construction_management)
 ✔ Connected to MongoDB successfully!
-ℹ Detected 101 collections in "construction_management"
+ℹ Detected 105 collections in "construction_management"
 ℹ Primary LLM: gemini-3.6-flash
 ℹ Fallback LLM: OpenRouter (meta-llama/llama-3.3-70b-instruct)
 ℹ Active Session: SESSION-1740291438902-148
 ✔ Super Agent ready! (MQL, Vector Search, Actions & Long-Term Memory)
 
-[SESSION-1740291438902-148] Ask Agent > Total sales revenue kitna h category wise?
+[SESSION-1740291438902-148] Ask Agent > What is the total sales revenue by category?
 ─────────────────────────────────────────────────────────────────────────────
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (1.42s)                       │
@@ -48,299 +49,282 @@ Point it to any MongoDB database (from local collections to massive multi-collec
 
 ---
 
-## ✨ Key Features
+## ✨ Key Capabilities
 
+- **🌐 Truly Generic & Schema-Agnostic:** Zero assumptions about collection names or schemas. The agent automatically inspects field names, nested dot-notation paths (`address.city`), mixed data types, arrays, and index definitions on demand.
 - **🗣️ Natural Language Text-to-MQL & Aggregations:** Converts plain language questions into native MongoDB `find` filters and multi-stage aggregation pipelines (`$group`, `$lookup`, `$match`, `$sort`, `$project`) automatically.
-- **🔍 Hybrid Vector Search & RAG:** High-dimensional semantic search powered by `gemini-embedding-001` (3072 dimensions). Supports native **MongoDB Atlas `$vectorSearch`** with seamless fallback to in-memory cosine similarity for local MongoDB instances.
-- **⚙️ Autonomous Operational Tasks:** Safely executes write operations (e.g., updating orders, restocking inventory) with automatic change tracking recorded into an `audit_logs` collection.
-- **🧠 Long-Term Memory & Conversation Persistence:** Stores chat history, active user sessions, and autonomously learned user preferences/facts in MongoDB (`sessions`, `chat_messages`, `user_memories`).
-- **🛡️ Enterprise Dual-LLM Redundancy:** When Google Gemini hits Free Tier rate limits (`429` / quota exhaustion), the agent **automatically fails over to OpenRouter (`meta-llama/llama-3.3-70b-instruct`)** with zero interruption and preserved multi-turn context.
-- **⚡ Dynamic Schema Introspection:** Intelligently discovers collection names and on-demand field types on the fly. Works out-of-the-box on databases with 100+ collections without token prompt bloat.
+- **🛡️ Multi-Layer Security & Policy Enforcement:** Prohibits hazardous JavaScript execution (`$where`, `$function`, `$accumulator`) and unauthorized writes through pipelines (`$out`, `$merge`). Query timeouts (`5000ms`), limit ceilings (`50` max docs), and pipeline stage ceilings (`20` max stages) prevent runaway load.
+- **⚠️ Action-Bound Confirmation Protocol:** Destructive write operations (`insert`, `update`, `delete`) require a human confirmation step. Tokens are cryptographically bound to the staging user, target project, collection, action, and payload, preventing token hijacking, scope expansion, and replay attacks.
+- **🔒 Race-Free Bounded Writes:** Multi-document updates and deletions target explicit verified document IDs (`{ _id: { $in: targetIds } }`), preventing time-of-check to time-of-use (TOCTOU) race conditions.
+- **🏢 Multi-Tenant Project & Connection Management:** Supports multiple isolated projects. The server securely maps `userId + projectId` to isolated connection pools with RBAC (`readOnly` vs `readWrite`) and collection whitelists/blacklists. MongoDB credentials are never exposed to the LLM.
+- **🔍 Hybrid Vector Search & RAG:** High-dimensional semantic search powered by `gemini-embedding-001` (3072 dimensions) with resilient offline fallback. Supports native **MongoDB Atlas `$vectorSearch`** with seamless fallback to in-memory cosine similarity for local instances.
+- **🧠 Long-Term Memory & User Preferences:** Stores conversation history, active user sessions, and autonomously learned user preferences in isolated MongoDB collections scoped strictly by `userId + sessionId`.
+- **🚀 Production REST API Server:** Built-in HTTP REST API with Bearer token authentication, sliding-window rate limiting (`60 req/min`), request tracing (`X-Request-Id`), and in-memory schema caching (`15-min TTL`).
+- **🛡️ Enterprise Dual-LLM Redundancy:** When Google Gemini hits Free Tier rate limits (`429` / quota exhaustion), the agent **automatically fails over to OpenRouter (`meta-llama/llama-3.3-70b-instruct`)** with zero interruption.
 
 ---
 
-## 🏛️ Architecture & Execution Flow
+## 🏛️ System Architecture
 
-### System Component Architecture
-```mermaid
-flowchart TD
-    User([User / Developer]) --> CLI["Interactive REPL CLI (src/cli.ts)"]
-    CLI --> Orchestrator["Unified Agent Orchestrator (src/agents/unified-agent.ts)"]
-
-    subgraph LLM_Layer ["High-Availability LLM Layer"]
-        Gemini["Google Gemini 3.6 Flash (Primary)"]
-        OpenRouter["OpenRouter Llama 3.3 70B (Failover)"]
-        Gemini -.->|429 Rate Limit / Quota| OpenRouter
-    end
-
-    Orchestrator <--> LLM_Layer
-
-    subgraph Toolsets ["Tool Subsystems (13 Tools)"]
-        T1["Query Agent: list_collections, get_schema, find, aggregate"]
-        T2["RAG Agent: semantic_search, add_knowledge_document"]
-        T3["Task Agent: update_order, adjust_inventory, view_audit_trail"]
-        T4["Memory Agent: remember_fact, get_memories, list_sessions"]
-    end
-
-    Orchestrator --> Toolsets
-
-    subgraph Database ["MongoDB (Local or Atlas Cluster)"]
-        BusinessDB[("Collections (Data / ERP / Store)")]
-        Vectors[("knowledge_base (3072-dim Vectors)")]
-        Audit[("audit_logs (Operational Trail)")]
-        MemoryDB[("sessions, chat_messages, user_memories")]
-    end
-
-    Toolsets <--> Database
-```
-
-### End-to-End Query & Failover Workflow
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Developer / User
-    participant CLI as Interactive CLI
-    participant Agent as Unified Agent
-    participant Gemini as Google Gemini 3.6 Flash
-    participant OR as OpenRouter (Llama 3.3 70B)
-    participant Mongo as MongoDB Cluster
-
-    User->>CLI: "Show top 5 vendor expenses"
-    CLI->>Agent: ask(query)
-    Agent->>Mongo: Fetch active memory & collection index
-    Agent->>Gemini: Prompt + 13 Tool Definitions
-    
-    alt Primary Provider (Gemini) OK
-        Gemini->>Agent: call tool `run_aggregation`
-        Agent->>Mongo: Execute aggregation pipeline
-        Mongo-->>Agent: Pipeline results
-        Agent->>Gemini: Tool response data
-        Gemini-->>Agent: Natural language answer
-    else Gemini 429 Rate Limit / Quota Exhausted
-        Gemini--xAgent: 429 Rate Limit Reached
-        Note over Agent,OR: 🛡️ Automatic Zero-Downtime Failover
-        Agent->>OR: Fallback request with multi-turn history
-        OR->>Agent: call tool `run_aggregation`
-        Agent->>Mongo: Execute aggregation pipeline
-        Mongo-->>Agent: Pipeline results
-        Agent->>OR: Tool response data
-        OR-->>Agent: Natural language answer
-    end
-
-    Agent->>Mongo: Persist Q&A to `chat_messages`
-    Agent-->>CLI: Formatted answer + Provider badge
-    CLI-->>User: Render visual answer card
+```text
+User / HTTP Client
+       ↓
+Authenticated REST API (Bearer Auth, Rate Limiter, Sanitized Errors)
+       ↓
+Project & Connection Context (RBAC, Connection Pooling, Credential Shielding)
+       ↓
+AI Super Agent (Unified Orchestrator: Query, Task, RAG, Memory)
+       ↓
+Structured Tool Call (JSON Schema, safe JSON parser)
+       ↓
+Security & Policy Layer (Blocked Operators, Clamped Limits, Ceiling Guards)
+       ↓
+Confirmation Layer (Action-Bound, Single-Use Staging Tokens)
+       ↓
+DatabaseAdapter (Pure Generic Abstraction, Zero Raw Db Leaks)
+       ↓
+MongoDatabaseAdapter (ID-Bounded Race-Free Writes, Timeout Safeguards)
+       ↓
+Target Project MongoDB (Local or Atlas Cluster)
 ```
 
 ---
 
-## 🛠️ The 4 Autonomous Stages
-
-| Stage | Capability | Description |
-|---|---|---|
-| **Stage 1** | **Text-to-MQL Query Engine** | Inspects collection structures dynamically, filters documents, and builds advanced aggregation pipelines without writing raw MongoDB queries. |
-| **Stage 2** | **Semantic Vector RAG** | Indexes knowledge articles and product descriptions into 3072-dimensional vector embeddings to answer unstructured questions and provide semantic recommendations. |
-| **Stage 3** | **Operational Task Execution** | Modifies records, creates new documents, handles inventory balances, and produces an immutable audit trail for compliance. |
-| **Stage 4** | **Persistent Long-Term Memory** | Tracks user persona, remembers user facts across conversations, and maintains session continuity in MongoDB. |
-
----
-
-## 🚀 Quickstart Guide
+## 🚀 Quick Start
 
 ### 1. Prerequisites
-
-- **Node.js** >= 18.0.0
-- **MongoDB** >= 6.0 (Local instance running on `localhost:27017` or a MongoDB Atlas URI)
-- **Google Gemini API Key** (Get one free at [Google AI Studio](https://aistudio.google.com/))
-- *(Optional, recommended)* **OpenRouter API Key** for failover redundancy ([openrouter.ai](https://openrouter.ai/))
+- **Node.js** v18+ 
+- **MongoDB** v7.0+ (Local instance or MongoDB Atlas URI)
+- **Google Gemini API Key** (from [Google AI Studio](https://aistudio.google.com/))
+- *(Optional)* **OpenRouter API Key** (for automatic failover fallback)
 
 ### 2. Installation
-
-Clone this repository and install dependencies:
-
 ```bash
+# Clone the repository
 git clone https://github.com/codewithmanish102003/MongoDB-AI-Agent.git
 cd MongoDB-AI-Agent
+
+# Install dependencies
 npm install
 ```
 
-### 3. Environment Configuration
-
-Copy the example environment file:
-
+### 3. Configuration
+Copy the example environment template:
 ```bash
 cp .env.example .env
 ```
-
-Configure your `.env` file:
-
+Configure `.env`:
 ```env
-# Primary Provider: Google Gemini
+# MongoDB Connection
+MONGO_URI=mongodb://localhost:27017
+MONGO_DATABASE=construction_management
+
+# LLM Providers
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-3.6-flash
 
-# Fallback Provider: OpenRouter (Optional, for automatic 429 failover)
+# Optional: OpenRouter Fallback
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
 
-# MongoDB Connection
-MONGODB_URI=mongodb://localhost:27017
-MONGODB_DATABASE=mongodb_ai_agent_db
+# API Server Port
+PORT=3000
 ```
 
-> **Tip:** You can change `MONGODB_DATABASE` to any existing database on your cluster (e.g., your own ERP, e-commerce, or SaaS database).
-
-### 4. (Optional) Seed Sample Data
-
-If starting fresh without existing data, seed sample e-commerce records and vector knowledge base:
-
+### 4. Seed Knowledge & Sample Data (Optional)
 ```bash
-# Seed sample customers, products, and orders
+# Seed sample collections (if testing from scratch)
 npm run seed
 
-# Seed knowledge articles and generate 3072-dim embeddings
+# Seed knowledge base with vector embeddings
 npm run seed:vectors
 ```
 
-### 5. Launch the AI Agent
-
-Start the interactive terminal CLI:
-
+### 5. Launch Terminal Interactive CLI
 ```bash
 npm run dev
 ```
 
----
-
-## 💻 Interactive CLI Commands
-
-Inside the agent terminal, special management commands are available:
-
-| Command | Description |
-|---|---|
-| `memory` | View all long-term facts the AI has autonomously remembered about you. |
-| `sessions` | Display all past and current conversation sessions. |
-| `new` | Reset context and start a brand new conversation session. |
-| `clear` | Clear the terminal console. |
-| `exit` | Gracefully disconnect from MongoDB and quit. |
+### 6. Start the REST API Server
+```bash
+npm run start:api
+```
+The server will start at `http://localhost:3000`.
 
 ---
 
-## 💡 Example Queries to Try
+## 🌐 REST API Reference
 
-### 📊 1. Database Analytics & Aggregations
-```text
-[CLI] Ask Agent > Which top 3 categories generated the highest revenue?
+All requests accept and return JSON. In production (`NODE_ENV=production`), include header `Authorization: Bearer <userId>`. In development/testing, you can also pass `X-User-Id: <userId>`.
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (1.23s)                       │
-├─────────────────────────────────────────────────────────────────────────────┘
-  Top 3 Product Categories by Total Revenue:
-
-  1. Electronics   : $ 42,950.00  (62 orders)
-  2. Office Chairs : $ 28,400.00  (39 orders)
-  3. Desks & Racks : $ 19,100.00  (21 orders)
-└─────────────────────────────────────────────────────────────────────────────
+### 1. Healthcheck
+```http
+GET /health
+```
+**Response (200 OK):**
+```json
+{
+  "status": "ok",
+  "version": "1.0.0",
+  "uptime": 124.5,
+  "timestamp": "2026-09-25T18:00:00.000Z"
+}
 ```
 
-### 🔍 2. Semantic Vector Search & Recommendations (RAG)
-```text
-[CLI] Ask Agent > Recommend ergonomic items for back comfort
+### 2. Register a Project
+```http
+POST /projects
+Content-Type: application/json
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (0.95s)                       │
-├─────────────────────────────────────────────────────────────────────────────┘
-  Top Semantic Matches (Cosine Similarity Score):
-
-  • ErgoLux Executive Mesh Chair (Score: 0.892)
-    - Dynamic lumbar support, adjustable 3D armrests, breathable mesh
-  • ActiveStanding Height-Adjustable Desk (Score: 0.841)
-    - Dual electric motors, programmable memory presets (65cm - 125cm)
-└─────────────────────────────────────────────────────────────────────────────
+{
+  "projectId": "proj_crm",
+  "name": "B2B CRM Pipeline",
+  "connectionUri": "mongodb://localhost:27017",
+  "databaseName": "crm_database",
+  "defaultRole": "readWrite",
+  "allowedCollections": ["leads", "deals", "contacts"]
+}
 ```
 
-### ⚡ 3. Operational Actions & Immutable Audit Logging
-```text
-[CLI] Ask Agent > Update order #ORD-1002 status to Shipped with tracking TRK-8821
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (1.10s)                       │
-├─────────────────────────────────────────────────────────────────────────────┘
-  ✔ Order #ORD-1002 updated to "Shipped"
-  ✔ Tracking Number attached: "TRK-8821"
-  ✔ Audit Log recorded with ID: 67b84d912f84bc109aef82b3
-└─────────────────────────────────────────────────────────────────────────────
+### 3. List Authorized Projects
+```http
+GET /projects
 ```
+Returns all projects accessible to the authenticated user (credentials and connection URIs are masked).
 
-### 🧠 4. Autonomous Long-Term Memory & Context Recall
-```text
-[CLI] Ask Agent > Remember that my priority is cost efficiency and INR pricing
+### 4. Inspect Project Schema (Cached)
+```http
+GET /projects/:id/schema
+```
+Returns discovered collections, fields, and approximate types. Served from the 15-minute in-memory cache.
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ 🤖 Super Agent Response  ⚡ Gemini 3.6 Flash  (0.88s)                       │
-├─────────────────────────────────────────────────────────────────────────────┘
-  ✔ Got it! I have saved this preference to your long-term profile:
-    • [financial_preference] cost_priority: "Cost efficiency & INR pricing"
-    I will tailor future recommendations and budget breakdowns accordingly.
-└─────────────────────────────────────────────────────────────────────────────
+### 5. Refresh Schema Cache
+```http
+POST /projects/:id/refresh-schema
+```
+Invalidates cached schema and re-introspects the target database.
+
+### 6. Interactive Chat with Agent
+```http
+POST /projects/:id/chat
+Content-Type: application/json
+
+{
+  "message": "Show me top deals in closed won stage",
+  "sessionId": "SESSION-OPTIONAL-ID"
+}
+```
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "projectId": "proj_crm",
+  "sessionId": "SESSION-123456",
+  "response": "Here are the top deals currently in Closed Won...",
+  "provider": "gemini"
+}
 ```
 
 ---
 
-## 🔌 Connecting to Your Own Existing Database
+## 🧪 Comprehensive Automated Testing (11 Test Suites - 100% Pass)
 
-The agent was built from the ground up to plug into any existing MongoDB database:
+The codebase includes an extensive suite of 11 dedicated test suites covering low-level drivers up to REST API endpoints:
 
-1. Open `.env` and set `MONGODB_DATABASE=your_production_db`.
-2. Start the agent: `npm run dev`.
-3. The agent will automatically:
-   - Read collection names without dumping entire schemas (saving LLM token usage).
-   - Inspect specific collection schemas on-demand when a relevant question is asked.
-   - Execute targeted read/write operations accurately based on your actual document field types.
+```bash
+# Run generic agent test pipeline
+npm test
+
+# Run individual test suites:
+npx tsx tests/phase9-hardening-verification.test.ts  # Token tamper resistance & race-free writes
+npx tsx tests/multi-schema-genericity.test.ts         # Blog, CRM, and School generic verification
+npx tsx tests/comprehensive-agent-validation.test.ts  # End-to-end full system validation
+npx tsx tests/backend-api.test.ts                    # REST API endpoints, auth & rate limiting
+npx tsx tests/security-authorization.test.ts         # RBAC, whitelists, append-only audit
+npx tsx tests/project-connection-manager.test.ts     # Multi-project connection pools
+npx tsx tests/task-agent-generic.test.ts             # Generic CRUD & confirmation staging
+npx tsx tests/query-agent-generic.test.ts            # Dynamic MQL generation & schema handoff
+npx tsx tests/schema-inspector.test.ts               # Deep schema introspection & types
+npx tsx tests/database-abstraction.test.ts           # DatabaseAdapter & Policy checks
+```
 
 ---
 
-## 🗂️ Project Structure
+## 🗂️ Project Directory Structure
 
 ```text
 mongodb-ai-agent/
 ├── src/
 │   ├── agents/
 │   │   ├── memory-agent/          # Session management & user memory store
-│   │   │   ├── store.ts
-│   │   │   └── tools.ts
-│   │   ├── query-agent/           # Schema inspection & Text-to-MQL engine
-│   │   │   └── tools.ts
-│   │   ├── rag-agent/             # Atlas Vector Search & cosine similarity
-│   │   │   └── tools.ts
-│   │   ├── task-agent/            # Write actions & transactional audit trail
-│   │   │   └── tools.ts
+│   │   │   ├── store.ts           # Scoped MongoDB session store
+│   │   │   └── tools.ts           # remember_user_fact, get_user_memories
+│   │   ├── query-agent/           # Generic schema inspection & Text-to-MQL engine
+│   │   │   ├── prompts.ts
+│   │   │   ├── tools.ts           # list_collections, get_collection_schema, find, aggregate
+│   │   │   └── index.ts
+│   │   ├── rag-agent/             # Atlas Vector Search & cosine similarity RAG
+│   │   │   ├── prompts.ts
+│   │   │   ├── tools.ts           # semantic_search, add_knowledge_document
+│   │   │   └── index.ts
+│   │   ├── task-agent/            # Generic write actions & confirmation protocol
+│   │   │   ├── prompts.ts
+│   │   │   ├── tools.ts           # execute_task_operation (insert, update, delete)
+│   │   │   └── index.ts
 │   │   └── unified-agent.ts       # Central orchestrator & dual-LLM fallback logic
+│   ├── api/                       # Production REST API layer
+│   │   ├── middleware.ts          # Bearer auth, rate limiting, request tracing
+│   │   ├── routes.ts              # Express-free native router (/projects, /chat, /schema)
+│   │   ├── schema-cache.ts        # 15-minute in-memory schema cache
+│   │   └── server.ts              # HTTP server entry point
 │   ├── config/
-│   │   ├── db.ts                  # MongoDB connection pool manager
+│   │   ├── db.ts                  # Base MongoDB connection helper
 │   │   └── env.ts                 # Type-safe environment validation (Zod)
-│   ├── data/
-│   │   ├── seed.ts                # Sample operational dataset
-│   │   └── seed-knowledge.ts      # Knowledge base seed & embedding generation
+│   ├── database/                  # Core Database Abstraction & Security Layer
+│   │   ├── adapter.ts             # DatabaseAdapter generic interface
+│   │   ├── confirmation.ts        # Action-bound confirmation manager
+│   │   ├── mongo-adapter.ts       # Production MongoDatabaseAdapter implementation
+│   │   ├── policy.ts              # Operator blocklist & query guardrails
+│   │   └── schema-inspector.ts    # Dynamic MongoDB schema discovery engine
+│   ├── projects/                  # Multi-Tenant Project & Connection Management
+│   │   ├── connection-manager.ts  # Dynamic connection pooling per URI
+│   │   ├── project-manager.ts     # Project registry & RBAC permission checks
+│   │   └── types.ts               # Project interfaces & error definitions
 │   ├── llm/
-│   │   ├── embeddings.ts          # Gemini embedding-001 service
+│   │   ├── embeddings.ts          # Gemini embedding service with resilient fallback
 │   │   ├── gemini.ts              # Google GenAI SDK interface
-│   │   └── openrouter.ts          # OpenAI-compatible OpenRouter caller
-│   └── cli.ts                     # Terminal REPL interface
-├── .env.example                   # Environment template
+│   │   └── openrouter.ts          # OpenRouter fallback caller
+│   ├── utils/
+│   │   └── logger.ts              # Colorized enterprise console logger
+│   └── cli.ts                     # Terminal REPL interactive CLI
+├── tests/                         # 11 Automated Test Suites
+│   ├── backend-api.test.ts
+│   ├── comprehensive-agent-validation.test.ts
+│   ├── database-abstraction.test.ts
+│   ├── generic-agent.test.ts
+│   ├── multi-schema-genericity.test.ts
+│   ├── phase9-hardening-verification.test.ts
+│   ├── project-connection-manager.test.ts
+│   ├── query-agent-generic.test.ts
+│   ├── schema-inspector.test.ts
+│   ├── security-authorization.test.ts
+│   └── task-agent-generic.test.ts
+├── .env.example                   # Environment configuration template
 ├── package.json                   # Scripts and project dependencies
 ├── tsconfig.json                  # TypeScript compiler configuration
-└── README.md                      # Project documentation
+└── README.md                      # Comprehensive documentation
 ```
 
 ---
 
-## 🔒 Security & Best Practices
+## 🔒 Security & Guardrail Principles
 
-- **Strict Tool Scoping:** Database operations are restricted to structured agent tools. Arbitrary code or script execution (`eval`) is disabled.
-- **Audit Logging:** Every database write, status update, and inventory change logs the timestamp, actor, collection, target document ID, and operation payload into `audit_logs`.
-- **Safe Aggregation:** Pipelines are executed via standard MongoDB driver methods with bounded result sets (`limit: 50`) to prevent memory exhaustion.
-- **Failover Security:** Fallback to secondary providers passes only the current message history and relevant tool responses without leaking environment configurations.
+1. **Zero Credential Leakage:** MongoDB connection strings and credentials are managed strictly in the application layer and never sent to LLM prompts.
+2. **Prohibited Operators:** `$where`, `$function`, and `$accumulator` (arbitrary JavaScript execution) are strictly blocked across all queries, projections, and aggregations.
+3. **Write Protection in Pipelines:** Aggregation pipeline stages `$out` and `$merge` are completely disallowed.
+4. **Mandatory Filter Requirement:** Empty filters `{}` are strictly blocked on updates and deletes to prevent accidental entire-collection mutations.
+5. **Confirmation Action Binding:** Confirmation tokens are cryptographically locked to the staging user, target project, collection, action type, and payload. Modified or replayed tokens are rejected immediately.
+6. **Append-Only Audit Trail:** Direct mutation or deletion of internal system collections (`audit_logs`, `sessions`) is blocked. All mutations are logged with actor, timestamp, target ID, and reason.
 
 ---
 
@@ -350,9 +334,10 @@ Contributions, bug reports, and feature requests are welcome!
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+3. Run test suites (`npm test`)
+4. Commit your Changes (`git commit -m 'feat: Add some AmazingFeature'`)
+5. Push to the Branch (`git push origin feature/AmazingFeature`)
+6. Open a Pull Request
 
 ---
 

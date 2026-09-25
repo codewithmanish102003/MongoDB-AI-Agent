@@ -4,30 +4,37 @@ import { ragAgentFunctionDeclarations, executeRagTool } from './rag-agent/tools.
 import { taskAgentFunctionDeclarations, executeTaskTool } from './task-agent/tools.js';
 import { memoryAgentFunctionDeclarations, executeMemoryTool } from './memory-agent/tools.js';
 import { MongoMemoryStore, SessionRecord } from './memory-agent/store.js';
+import { DatabaseAdapter } from '../database/adapter.js';
+import { MongoDatabaseAdapter } from '../database/mongo-adapter.js';
 import { logger } from '../utils/logger.js';
-import { getDatabase } from '../config/db.js';
 import { createPartFromFunctionResponse } from '@google/genai';
 import { isOpenRouterConfigured, askOpenRouterFallback, setDefaultMemoryStore } from '../llm/openrouter.js';
 
 const UNIFIED_AGENT_SYSTEM_PROMPT = `
 You are an expert Enterprise AI Assistant and Database Analyst connected to MongoDB.
-You serve as an intelligent data copilot for this database.
+You serve as an intelligent, autonomous data and operational copilot for ANY database connected (ERPs, SaaS, CRM, Logistics, Healthcare, E-Commerce, Construction, Finance, etc.).
 
-### Core Superpowers:
-1. **Database Queries & Analytics**:
-   - Inspect collection schemas using \`get_collection_schema\` before querying unfamiliar collections.
+### Core Superpowers & Toolsets:
+1. **Dynamic Database Queries & Analytics (Read)**:
+   - Call \`list_collections\` to see all collections in the database.
+   - ALWAYS inspect collection schemas using \`get_collection_schema\` before querying or writing to unfamiliar collections. Never guess field names!
    - Run safe \`find_documents\` queries with filters, projections, and sorting.
-   - Run \`run_aggregation\` for calculations, counts, sums, revenue, and statistical grouping.
-2. **Semantic Search & RAG**:
-   - Use \`semantic_search\` for conceptual searches or policy questions.
-3. **Operational Workflows**:
-   - Use \`update_order_status\`, \`adjust_product_inventory\`, \`create_new_order\`, \`view_audit_trail\`.
-4. **Long-Term Memory**:
-   - Use \`remember_user_fact\` when the user tells you personal preferences or constraints.
+   - Run \`run_aggregation\` for multi-stage analytics, metrics, counts, sums, revenue, and statistical grouping.
+2. **Semantic Search & Vector RAG**:
+   - Use \`semantic_search\` for conceptual searches, semantic queries, recommendations, or policy lookups across any collection or knowledge base.
+   - Use \`add_knowledge_document\` to index new reference documents with vector embeddings.
+3. **Operational Workflows & Modifications (Write)**:
+   - Use \`update_document\` to safely modify records in ANY collection (e.g. changing status, approving items, updating contacts) with full audit logging.
+   - Use \`insert_document\` to create new records in any collection.
+   - Use \`delete_document\` to remove records with mandatory reason logging.
+   - Use \`view_audit_trail\` to inspect recent database modifications, history, and operation logs.
+4. **Long-Term Memory & Personalization**:
+   - Use \`remember_user_fact\` when the user mentions personal preferences, identity, business priorities, or constraints.
+   - Use \`get_user_memories\` to recall past user context.
 
 ### Response Quality & Analytical Guidelines:
-- **Be Thorough & Informative**: Never give dry, one-word, or incomplete answers. When asked about projects, orders, vendors, or expenses, provide structured details (e.g. names, IDs, statuses, clients, and financial values formatted clearly in INR ₹).
-- **Inspect Schemas Before Assuming Fields**: Different databases use different field names (e.g., a project might have 'name' or 'projectName'; a work order might have 'woNo' and 'status: Pending / Approved'). Always verify field names and sample values using \`get_collection_schema\` rather than assuming standard field names like 'status: running'.
+- **Be Thorough & Informative**: Never give dry, one-word, or incomplete answers. Provide structured details (names, IDs, statuses, clients, timestamps, and financial values formatted clearly).
+- **Inspect Schemas Before Assuming Fields**: Different databases use different field names (e.g., projects might use 'projectName' or 'projectCode', work orders might use 'woNo' and 'status: Pending / Approved'). Always inspect schemas using \`get_collection_schema\` rather than assuming standard field names like 'status: running'.
 - **Language**: Respond in natural, professional language matching the user's inquiry (English, Hindi, or Hinglish).
 `;
 
@@ -38,24 +45,30 @@ export class UnifiedAgent {
   public lastProviderUsed: 'gemini' | 'openrouter' = 'gemini';
   private userId: string;
   private sessionId?: string;
+  public adapter: DatabaseAdapter;
 
-  constructor(userId: string = 'default_user', sessionId?: string) {
+  constructor(userId: string = 'default_user', sessionId?: string, adapter?: DatabaseAdapter) {
     this.userId = userId;
     this.sessionId = sessionId;
-    this.memoryStore = new MongoMemoryStore(this.userId);
+    this.adapter = adapter || new MongoDatabaseAdapter();
+    let memoryDb: any;
+    if (this.adapter instanceof MongoDatabaseAdapter) {
+      try {
+        memoryDb = this.adapter.getDb();
+      } catch {}
+    }
+    this.memoryStore = new MongoMemoryStore(this.userId, memoryDb);
     setDefaultMemoryStore(this.memoryStore);
   }
 
   private async fetchDatabaseContext(): Promise<string> {
     try {
-      const db = getDatabase();
-      const collections = await db.listCollections().toArray();
-      const valid = collections.filter((c) => !c.name.startsWith('system.'));
+      const collections = await this.adapter.listCollections();
 
-      if (valid.length === 0) return '';
+      if (collections.length === 0) return '';
 
       // Compact context: list collection names without dumping massive raw schemas
-      return `\n### Database Collections Overview (${valid.length} collections):\n${valid.map((c) => c.name).join(', ')}\n(Call \`get_collection_schema\` to inspect fields for any specific collection before querying).\n`;
+      return `\n### Database Collections Overview (${collections.length} collections):\n${collections.join(', ')}\n(Call \`get_collection_schema\` to inspect fields for any specific collection before querying).\n`;
     } catch {
       return '';
     }
@@ -83,12 +96,19 @@ export class UnifiedAgent {
     const dbContext = await this.fetchDatabaseContext();
     const memoryContext = await this.fetchMemoryContext();
 
-    const allTools = [
+    const seen = new Set<string>();
+    const allTools: any[] = [];
+    for (const d of [
       ...queryAgentFunctionDeclarations,
       ...ragAgentFunctionDeclarations,
       ...taskAgentFunctionDeclarations,
       ...memoryAgentFunctionDeclarations
-    ];
+    ]) {
+      if (d.name && !seen.has(d.name)) {
+        seen.add(d.name);
+        allTools.push(d);
+      }
+    }
 
     this.chat = ai.chats.create({
       model,
@@ -169,7 +189,7 @@ export class UnifiedAgent {
         // Append current user message
         convoMessages.push({ role: 'user', content: userQuery });
 
-        answer = await askOpenRouterFallback(convoMessages);
+        answer = await askOpenRouterFallback(convoMessages, undefined, this.adapter);
       } else {
         throw err;
       }
@@ -196,11 +216,11 @@ export class UnifiedAgent {
         try {
           let result: any;
           if (queryAgentFunctionDeclarations.some((d) => d.name === call.name)) {
-            result = await executeQueryTool(call.name, call.args || {});
+            result = await executeQueryTool(call.name, call.args || {}, this.adapter);
           } else if (ragAgentFunctionDeclarations.some((d) => d.name === call.name)) {
-            result = await executeRagTool(call.name, call.args || {});
+            result = await executeRagTool(call.name, call.args || {}, this.adapter);
           } else if (taskAgentFunctionDeclarations.some((d) => d.name === call.name)) {
-            result = await executeTaskTool(call.name, call.args || {});
+            result = await executeTaskTool(call.name, call.args || {}, this.adapter);
           } else {
             result = await executeMemoryTool(call.name, call.args || {}, this.memoryStore);
           }
