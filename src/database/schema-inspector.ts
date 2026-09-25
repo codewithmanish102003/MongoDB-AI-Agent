@@ -9,6 +9,7 @@
 import { Db, Collection } from 'mongodb';
 import { getDatabase } from '../config/db.js';
 import { validateCollectionName, QUERY_TIMEOUT_MS } from './policy.js';
+import { DatabaseAdapter } from './adapter.js';
 
 export interface IndexInfo {
   name: string;
@@ -40,13 +41,18 @@ export interface SchemaInspectorOptions {
 }
 
 export class SchemaInspector {
+  private adapter?: DatabaseAdapter;
   private dbInstance?: Db;
   private sampleSize: number;
   private timeoutMs: number;
   private maxNestingDepth: number;
 
-  constructor(db?: Db, options?: SchemaInspectorOptions) {
-    this.dbInstance = db;
+  constructor(target?: Db | DatabaseAdapter, options?: SchemaInspectorOptions) {
+    if (target && 'getDatabaseSchema' in target) {
+      this.adapter = target as DatabaseAdapter;
+    } else {
+      this.dbInstance = target as Db | undefined;
+    }
     this.sampleSize = Math.min(Math.max(options?.sampleSize || 5, 1), 20);
     this.timeoutMs = Math.min(options?.timeoutMs || QUERY_TIMEOUT_MS, QUERY_TIMEOUT_MS);
     this.maxNestingDepth = options?.maxNestingDepth || 4;
@@ -162,6 +168,19 @@ export class SchemaInspector {
    * Inspects a single collection by name and returns comprehensive schema metadata.
    */
   async inspectCollection(collectionName: string): Promise<CollectionSchemaInfo> {
+    if (this.adapter) {
+      const schema = await this.adapter.getCollectionSchema(collectionName);
+      return {
+        collectionName: schema.collectionName,
+        isEmpty: schema.isEmpty,
+        sampleCount: schema.sampleDocument ? 1 : 0,
+        totalDocumentEstimate: schema.totalCount || 0,
+        fields: schema.fields,
+        indexes: schema.indexes || [],
+        sampleDocument: schema.sampleDocument
+      };
+    }
+
     const validName = validateCollectionName(collectionName);
     const db = this.getDb();
     const collection = db.collection(validName);
@@ -223,6 +242,30 @@ export class SchemaInspector {
    * Discovers and inspects all non-system collections across the database.
    */
   async inspectDatabase(targetCollections?: string[]): Promise<DatabaseSchemaReport> {
+    if (this.adapter) {
+      const allSchemas = await this.adapter.getDatabaseSchema();
+      const report: DatabaseSchemaReport = {
+        databaseName: 'database',
+        collectionCount: Object.keys(allSchemas).length,
+        collections: {},
+        generatedAt: new Date()
+      };
+      for (const [colName, schema] of Object.entries(allSchemas)) {
+        if (!targetCollections || targetCollections.includes(colName)) {
+          report.collections[colName] = {
+            collectionName: schema.collectionName,
+            isEmpty: schema.isEmpty,
+            sampleCount: schema.sampleDocument ? 1 : 0,
+            totalDocumentEstimate: schema.totalCount || 0,
+            fields: schema.fields,
+            indexes: schema.indexes || [],
+            sampleDocument: schema.sampleDocument
+          };
+        }
+      }
+      return report;
+    }
+
     const db = this.getDb();
     let colNames: string[] = [];
 

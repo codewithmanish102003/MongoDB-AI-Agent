@@ -1,6 +1,5 @@
 import { DatabaseAdapter } from '../../database/adapter.js';
 import { MongoDatabaseAdapter } from '../../database/mongo-adapter.js';
-import { SchemaInspector } from '../../database/schema-inspector.js';
 import { logger } from '../../utils/logger.js';
 import { Type, FunctionDeclaration } from '@google/genai';
 
@@ -143,10 +142,7 @@ export async function executeQueryTool(name: string, args: any, adapter?: Databa
       const { collectionName } = args;
       logger.tool('get_collection_schema', `Collection: "${collectionName}"`);
 
-      const dbInstance = (currentAdapter as any)?.getDb?.();
-      const inspector = new SchemaInspector(dbInstance);
-      const schemaInfo = await inspector.inspectCollection(collectionName);
-      const schemaSummary = inspector.formatCollectionForLLM(schemaInfo);
+      const schemaInfo = await currentAdapter.getCollectionSchema(collectionName);
 
       logger.result(`Inferred ${Object.keys(schemaInfo.fields).length} fields for "${collectionName}"`);
       return {
@@ -156,7 +152,7 @@ export async function executeQueryTool(name: string, args: any, adapter?: Databa
         fields: schemaInfo.fields,
         indexes: schemaInfo.indexes,
         sampleDocument: schemaInfo.sampleDocument,
-        schemaSummary
+        schemaSummary: schemaInfo.schemaSummary
       };
     }
 

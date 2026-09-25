@@ -24,8 +24,33 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     return values;
   } catch (error: any) {
     logger.error(`Error generating embedding: ${error.message}`);
+    const isQuotaError =
+      error?.status === 429 ||
+      error?.message?.includes('429') ||
+      error?.message?.includes('RESOURCE_EXHAUSTED');
+
+    if (isQuotaError) {
+      logger.warn('Gemini embedding quota reached. Using resilient fallback embedding.');
+      return generateDeterministicFallbackEmbedding(cleanedText);
+    }
     throw error;
   }
+}
+
+function generateDeterministicFallbackEmbedding(text: string, dimensions: number = 768): number[] {
+  const vector = new Array(dimensions).fill(0);
+  const words = text.toLowerCase().split(/\s+/);
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    for (let c = 0; c < word.length; c++) {
+      const idx = (word.charCodeAt(c) * 31 + c * 17 + i * 13) % dimensions;
+      vector[idx] += 1.0 / (c + 1);
+    }
+  }
+  let norm = 0;
+  for (let i = 0; i < dimensions; i++) norm += vector[i] * vector[i];
+  norm = Math.sqrt(norm) || 1;
+  return vector.map((v) => v / norm);
 }
 
 /**

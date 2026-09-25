@@ -4,17 +4,14 @@ import { QUERY_AGENT_SYSTEM_PROMPT } from './prompts.js';
 import { logger } from '../../utils/logger.js';
 import { DatabaseAdapter } from '../../database/adapter.js';
 import { MongoDatabaseAdapter } from '../../database/mongo-adapter.js';
-import { SchemaInspector } from '../../database/schema-inspector.js';
 import { createPartFromFunctionResponse } from '@google/genai';
 
 export class QueryAgent {
   private chat: any = null;
   private adapter: DatabaseAdapter;
-  private schemaInspector: SchemaInspector;
 
   constructor(adapter?: DatabaseAdapter) {
     this.adapter = adapter || new MongoDatabaseAdapter();
-    this.schemaInspector = new SchemaInspector();
   }
 
   private async fetchDatabaseContext(): Promise<string> {
@@ -26,8 +23,8 @@ export class QueryAgent {
         return `\n### Database Collections Overview (${collections.length} collections):\n${collections.join(', ')}\n(Call \`get_collection_schema\` to inspect fields for any specific collection before querying).\n`;
       }
 
-      const report = await this.schemaInspector.inspectDatabase(collections);
-      return `\n### Discovered Database Schema Context:\n` + this.schemaInspector.formatReportForLLM(report);
+      const schemaRecord = await this.adapter.getDatabaseSchema();
+      return `\n### Discovered Database Schema Context:\n` + this.adapter.formatSchemaForLLM(schemaRecord);
     } catch {
       return '';
     }

@@ -1,4 +1,5 @@
-import { getDatabase } from '../../config/db.js';
+import { DatabaseAdapter } from '../../database/adapter.js';
+import { MongoDatabaseAdapter } from '../../database/mongo-adapter.js';
 import { generateEmbedding, cosineSimilarity } from '../../llm/embeddings.js';
 import { logger } from '../../utils/logger.js';
 import { Type, FunctionDeclaration } from '@google/genai';
@@ -58,10 +59,14 @@ export const ragAgentFunctionDeclarations: FunctionDeclaration[] = [
   }
 ];
 
-import { Db } from 'mongodb';
+let defaultRagAdapter: DatabaseAdapter = new MongoDatabaseAdapter();
 
-export async function executeRagTool(name: string, args: any, dbInstance?: Db): Promise<any> {
-  const db = dbInstance || getDatabase();
+export function setDefaultRagDatabaseAdapter(adapter: DatabaseAdapter) {
+  defaultRagAdapter = adapter;
+}
+
+export async function executeRagTool(name: string, args: any, adapter?: DatabaseAdapter): Promise<any> {
+  const currentAdapter = adapter || defaultRagAdapter;
 
   switch (name) {
     case 'semantic_search': {
@@ -95,13 +100,17 @@ export async function executeRagTool(name: string, args: any, dbInstance?: Db): 
           }
         ];
 
-        const atlasResults = await db.collection(targetCol).aggregate(atlasPipeline).toArray();
-        if (atlasResults.length > 0) {
-          logger.result(`Atlas $vectorSearch matched ${atlasResults.length} document(s) in "${targetCol}"`);
+        const atlasResults = await currentAdapter.aggregate({
+          collection: targetCol,
+          pipeline: atlasPipeline,
+          limit: safeLimit
+        });
+        if (atlasResults.results.length > 0) {
+          logger.result(`Atlas $vectorSearch matched ${atlasResults.results.length} document(s) in "${targetCol}"`);
           return {
             query,
             collection: targetCol,
-            matches: atlasResults
+            matches: atlasResults.results
           };
         }
       } catch {
@@ -109,16 +118,27 @@ export async function executeRagTool(name: string, args: any, dbInstance?: Db): 
       }
 
       // 3. Fallback: In-database cosine similarity matching
-      const docs = await db.collection(targetCol).find({ [vField]: { $exists: true } }).toArray();
+      const findRes = await currentAdapter.find({
+        collection: targetCol,
+        filter: { [vField]: { $exists: true } },
+        limit: 100
+      });
+      const docs = findRes.documents;
 
       if (docs.length === 0) {
         // Check if there are collections that DO have embeddings
-        const allCols = await db.listCollections().toArray();
+        const allCols = await currentAdapter.listCollections();
         const candidateCols: string[] = [];
         for (const c of allCols) {
-          if (!c.name.startsWith('system.')) {
-            const hasVec = await db.collection(c.name).findOne({ [vField]: { $exists: true } });
-            if (hasVec) candidateCols.push(c.name);
+          if (!c.startsWith('system.')) {
+            try {
+              const sample = await currentAdapter.find({
+                collection: c,
+                filter: { [vField]: { $exists: true } },
+                limit: 1
+              });
+              if (sample.documents.length > 0) candidateCols.push(c);
+            } catch {}
           }
         }
 
@@ -165,13 +185,16 @@ export async function executeRagTool(name: string, args: any, dbInstance?: Db): 
       const embedding = await generateEmbedding(textToEmbed);
 
       const docId = `DOC-${Date.now().toString().slice(-4)}`;
-      await db.collection(targetCol).insertOne({
-        docId,
-        title,
-        category,
-        content,
-        embedding,
-        createdAt: new Date()
+      await currentAdapter.insert({
+        collection: targetCol,
+        document: {
+          docId,
+          title,
+          category,
+          content,
+          embedding,
+          createdAt: new Date()
+        }
       });
 
       logger.result(`Added document with ID: ${docId} to "${targetCol}"`);

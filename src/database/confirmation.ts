@@ -5,8 +5,20 @@
  * before modifying the target MongoDB database.
  */
 
+export interface ConfirmationVerificationContext {
+  userId?: string;
+  projectId?: string;
+  action?: 'insert' | 'update' | 'delete';
+  collection?: string;
+  filter?: Record<string, any>;
+  update?: Record<string, any>;
+  document?: Record<string, any>;
+}
+
 export interface PendingOperation {
   confirmationId: string;
+  userId?: string;
+  projectId?: string;
   action: 'insert' | 'update' | 'delete';
   collection: string;
   filter?: Record<string, any>;
@@ -55,11 +67,42 @@ export class ConfirmationManager {
 
   /**
    * Retrieves and consumes a staged operation for execution.
+   * Validates that the executing user, project, collection, action, and parameters match the staged operation.
    */
-  public getAndConsume(confirmationId: string): PendingOperation | null {
+  public getAndConsume(confirmationId: string, context?: ConfirmationVerificationContext): PendingOperation | null {
     this.cleanExpired();
     const op = this.pendingOps.get(confirmationId);
     if (!op) return null;
+
+    if (context) {
+      if (context.userId && op.userId && context.userId !== op.userId) {
+        throw new Error(`Security violation: User "${context.userId}" is not authorized to redeem this confirmation token.`);
+      }
+      if (context.projectId && op.projectId && context.projectId !== op.projectId) {
+        throw new Error(`Security violation: Confirmation token was issued for project "${op.projectId}", not "${context.projectId}".`);
+      }
+      if (context.action && context.action !== op.action) {
+        throw new Error(`Security violation: Confirmation token action mismatch: expected "${op.action}", got "${context.action}".`);
+      }
+      if (context.collection && context.collection !== op.collection) {
+        throw new Error(`Security violation: Confirmation token was issued for collection "${op.collection}", not "${context.collection}".`);
+      }
+      if (context.filter && op.filter) {
+        if (JSON.stringify(context.filter) !== JSON.stringify(op.filter)) {
+          throw new Error('Security violation: Operation filter does not match the staged operation parameters.');
+        }
+      }
+      if (context.update && op.update) {
+        if (JSON.stringify(context.update) !== JSON.stringify(op.update)) {
+          throw new Error('Security violation: Update payload does not match the staged operation parameters.');
+        }
+      }
+      if (context.document && op.document) {
+        if (JSON.stringify(context.document) !== JSON.stringify(op.document)) {
+          throw new Error('Security violation: Document payload does not match the staged operation parameters.');
+        }
+      }
+    }
 
     this.pendingOps.delete(confirmationId);
     return op;

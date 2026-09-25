@@ -7,7 +7,6 @@ import {
   ProjectPermissionError
 } from '../projects/types.js';
 import { SchemaInspector } from '../database/schema-inspector.js';
-import { MongoDatabaseAdapter } from '../database/mongo-adapter.js';
 import { PolicyViolationError } from '../database/policy.js';
 import { UnifiedAgent } from '../agents/unified-agent.js';
 import { schemaCache } from './schema-cache.js';
@@ -145,8 +144,7 @@ export async function handleApiRoute(
         }
 
         const adapter = await projectManager.getAdapter(ctx.userId, projectId);
-        const mongoAdapter = adapter as MongoDatabaseAdapter;
-        const inspector = new SchemaInspector(mongoAdapter.getDb());
+        const inspector = new SchemaInspector(adapter);
         const report = await inspector.inspectDatabase();
 
         schemaCache.set(projectId, report);
@@ -164,8 +162,7 @@ export async function handleApiRoute(
       try {
         schemaCache.invalidate(projectId);
         const adapter = await projectManager.getAdapter(ctx.userId, projectId);
-        const mongoAdapter = adapter as MongoDatabaseAdapter;
-        const inspector = new SchemaInspector(mongoAdapter.getDb());
+        const inspector = new SchemaInspector(adapter);
         const report = await inspector.inspectDatabase();
 
         schemaCache.set(projectId, report);
@@ -204,8 +201,7 @@ export async function handleApiRoute(
         // Cache schema if not yet cached
         if (!schemaCache.get(projectId)) {
           try {
-            const mongoAdapter = adapter as MongoDatabaseAdapter;
-            const inspector = new SchemaInspector(mongoAdapter.getDb());
+            const inspector = new SchemaInspector(adapter);
             const report = await inspector.inspectDatabase();
             schemaCache.set(projectId, report);
           } catch {}

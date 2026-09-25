@@ -72,7 +72,7 @@ async function executeAnyTool(name: string, args: any, adapter?: DatabaseAdapter
   if (queryAgentFunctionDeclarations.some((d) => d.name === name)) {
     return await executeQueryTool(name, args, adapter);
   } else if (ragAgentFunctionDeclarations.some((d) => d.name === name)) {
-    return await executeRagTool(name, args, (adapter as any)?.getDb?.());
+    return await executeRagTool(name, args, adapter);
   } else if (taskAgentFunctionDeclarations.some((d) => d.name === name)) {
     return await executeTaskTool(name, args, adapter);
   } else {

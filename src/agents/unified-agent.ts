@@ -7,7 +7,6 @@ import { MongoMemoryStore, SessionRecord } from './memory-agent/store.js';
 import { DatabaseAdapter } from '../database/adapter.js';
 import { MongoDatabaseAdapter } from '../database/mongo-adapter.js';
 import { logger } from '../utils/logger.js';
-import { getDatabase } from '../config/db.js';
 import { createPartFromFunctionResponse } from '@google/genai';
 import { isOpenRouterConfigured, askOpenRouterFallback, setDefaultMemoryStore } from '../llm/openrouter.js';
 
@@ -29,7 +28,6 @@ You serve as an intelligent, autonomous data and operational copilot for ANY dat
    - Use \`insert_document\` to create new records in any collection.
    - Use \`delete_document\` to remove records with mandatory reason logging.
    - Use \`view_audit_trail\` to inspect recent database modifications, history, and operation logs.
-   - (Domain-specific tools like \`update_order_status\`, \`adjust_product_inventory\`, \`create_new_order\` are also available if the database has matching e-commerce collections).
 4. **Long-Term Memory & Personalization**:
    - Use \`remember_user_fact\` when the user mentions personal preferences, identity, business priorities, or constraints.
    - Use \`get_user_memories\` to recall past user context.
@@ -220,7 +218,7 @@ export class UnifiedAgent {
           if (queryAgentFunctionDeclarations.some((d) => d.name === call.name)) {
             result = await executeQueryTool(call.name, call.args || {}, this.adapter);
           } else if (ragAgentFunctionDeclarations.some((d) => d.name === call.name)) {
-            result = await executeRagTool(call.name, call.args || {}, (this.adapter as any).getDb?.());
+            result = await executeRagTool(call.name, call.args || {}, this.adapter);
           } else if (taskAgentFunctionDeclarations.some((d) => d.name === call.name)) {
             result = await executeTaskTool(call.name, call.args || {}, this.adapter);
           } else {

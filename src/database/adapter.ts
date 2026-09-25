@@ -5,11 +5,21 @@
  * any backend database without coupling to a specific database technology or schema.
  */
 
+export interface IndexInfo {
+  name: string;
+  keys: Record<string, number | string>;
+  unique?: boolean;
+}
+
 export interface CollectionSchema {
   collectionName: string;
+  isEmpty: boolean;
   fields: Record<string, string>;
   sampleDocument?: Record<string, any>;
   totalCount?: number;
+  totalDocumentEstimate?: number;
+  indexes?: IndexInfo[];
+  schemaSummary?: string;
 }
 
 export interface FindOptions {
@@ -95,6 +105,16 @@ export interface DatabaseAdapter {
   getCollectionSchema(collectionName: string): Promise<CollectionSchema>;
 
   /**
+   * Introspects the entire database schema across all accessible collections.
+   */
+  getDatabaseSchema(): Promise<Record<string, CollectionSchema>>;
+
+  /**
+   * Formats a collection or database schema into a compact, token-efficient representation for LLMs.
+   */
+  formatSchemaForLLM(schema: CollectionSchema | Record<string, CollectionSchema>): string;
+
+  /**
    * Executes a safe query with filtering, projection, sorting, and pagination limits.
    */
   find(options: FindOptions): Promise<FindResult>;
@@ -123,4 +143,14 @@ export interface DatabaseAdapter {
    * Deletes one or more documents in a collection matching a filter.
    */
   delete(options: DeleteOptions): Promise<DeleteResult>;
+
+  /**
+   * Records an immutable entry in the audit trail.
+   */
+  logAuditEvent(entry: any): Promise<any>;
+
+  /**
+   * Retrieves recent audit trail events.
+   */
+  getRecentAuditEvents(limit?: number): Promise<any[]>;
 }

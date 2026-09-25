@@ -82,13 +82,11 @@ export async function parseJsonBody(req: IncomingMessage, maxSizeBytes: number =
 
 /**
  * Resolves authenticated user ID from request headers.
- * Looks for 'x-user-id' or 'authorization: Bearer <userId>'.
+ * In production: strictly enforces 'authorization: Bearer <userId>'.
+ * In development/test: also accepts 'x-user-id' or falls back to 'default_user'.
  */
 export function resolveUserId(req: IncomingMessage): string {
-  const headerUserId = req.headers['x-user-id'];
-  if (typeof headerUserId === 'string' && headerUserId.trim()) {
-    return headerUserId.trim();
-  }
+  const isProduction = process.env.NODE_ENV === 'production';
 
   const authHeader = req.headers['authorization'];
   if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
@@ -96,8 +94,16 @@ export function resolveUserId(req: IncomingMessage): string {
     if (token) return token;
   }
 
-  // Fallback to default user for local developer ease
-  return 'default_user';
+  // Allow x-user-id header only in non-production environments for local testing/development
+  if (!isProduction) {
+    const headerUserId = req.headers['x-user-id'];
+    if (typeof headerUserId === 'string' && headerUserId.trim()) {
+      return headerUserId.trim();
+    }
+    return 'default_user';
+  }
+
+  throw new Error('Authentication required: Missing or invalid Bearer token.');
 }
 
 /**

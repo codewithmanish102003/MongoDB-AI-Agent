@@ -21,9 +21,15 @@ export interface ApiServerOptions {
 export function createRequestListener(rateLimiter = defaultRateLimiter) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     const startTime = Date.now();
-    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || '127.0.0.1';
     const requestId = (req.headers['x-request-id'] as string) || `req_${randomUUID().slice(0, 8)}`;
-    const userId = resolveUserId(req);
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || '127.0.0.1';
+    let userId: string;
+    try {
+      userId = resolveUserId(req);
+    } catch (authErr: any) {
+      sendError(res, 401, authErr.message || 'Unauthorized', requestId);
+      return;
+    }
 
     const ctx: RequestContext = {
       requestId,
